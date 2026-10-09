@@ -1,4 +1,4 @@
-import { test, assert } from 'vitest';
+import { test, assert, vi } from 'vitest';
 import { useAppStore, palettes } from './store.ts';
 import { MAX_SAVED, isSavedArticle, toSavedArticle } from './news.ts';
 import type { Article } from './news.ts';
@@ -150,4 +150,20 @@ test('store handles toast notices', () => {
   const store = useAppStore.getState();
   store.setNotice('رسالة اختبار');
   assert.equal(useAppStore.getState().notice, 'رسالة اختبار');
+});
+
+test('setNotice réarme le timer au lieu de le fuir', () => {
+  const store = useAppStore.getState();
+  vi.useFakeTimers();
+  try {
+    store.setNotice('même message');
+    vi.advanceTimersByTime(2000);
+    store.setNotice('même message');
+    vi.advanceTimersByTime(2000);
+    assert.equal(useAppStore.getState().notice, 'même message');
+    vi.advanceTimersByTime(2000);
+    assert.equal(useAppStore.getState().notice, '');
+  } finally {
+    vi.useRealTimers();
+  }
 });

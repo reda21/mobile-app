@@ -51,25 +51,32 @@
   - `Photo`/`Bookmark`/`ArticleCard`/`NewsRow` acceptent `CardArticle = Article | SavedArticle`.
 
 ### 5. Ajouter pagination / infinite scroll réel
-- [ ] À faire
+- [x] Fait le 09/10/2026
 - **Priorité :** 🟡 Moyenne
-- **Fichier(s) :** `src/lib/news.ts:getNews`, `src/app/index.tsx`
+- **Fichier(s) :** `src/app/index.tsx`
 - **Pourquoi :** Tu charges tout le flux RSS d'un coup. Pas de `onEndReached`, pas de `initialNumToRender` optimisé au-delà de 6.
-- **Action :** Affiche 12 items puis `slice(0, visibleCount)` + `onEndReached={() => setVisibleCount(c => c+12)}`. À terme, pagine côté `paged` RSS (`?paged=2`) si `hihi2.com` le supporte.
+- **Fait :** Fenêtre cliente `PAGE_SIZE = 12` : `visibleArticles = listData.slice(0, visibleCount)`, `onEndReached` + bouton « عرض المزيد (باقي X) » (`ListFooterComponent`), reset auto au changement de catégorie (ajustement au rendu, sans effet). La pagination serveur (`?paged=2`) reste une étape ultérieure si `hihi2.com` la supporte.
 
 ### 6. Sécuriser le cache : taille max, TTL par catégorie, `persistFeeds` throttled
-- [ ] À faire
+- [x] Fait le 09/10/2026
 - **Priorité :** 🔴 Haute
-- **Fichier(s) :** `src/lib/news.ts:98-139, 204-220`
+- **Fichier(s) :** `src/lib/news.ts`, nouveau `src/lib/news-cache.test.ts`
 - **Pourquoi :** `persistFeeds()` est appelé à chaque fetch sans `await` + sans throttle. `JSON.stringify(obj)` de tous les feeds peut faire des ANR.
-- **Action :** Limite à 30 articles/feed, 100 details max (déjà fait pour details, fais pareil pour feeds). `persistFeeds` debounced 500ms. Ajoute `try/catch JSON.parse` versionné : `feeds-cache-v2`.
+- **Fait :**
+  - Plafonds : `MAX_FEED_ARTICLES = 30` (tronqué dans `getNews` + au chargement), `MAX_DETAILS = 100` (déjà appliqué à l'insertion, désormais aussi au chargement + validation `isArticle`).
+  - Persistance throttlée 500 ms (`schedulePersistFeeds` / `schedulePersistDetails`, un seul timer) + `flushCachePersist()` pour forcer l'écriture.
+  - Clés versionnées `...-cache-v2` avec relecture du `v1` existant (migration transparente).
+  - Fenêtre de fraîcheur 120 s conservée. Tests : plafond à 30, réutilisation cache sans fetch.
 
 ### 7. Corriger les fuites `setTimeout` / `AbortController`
-- [ ] À faire
+- [x] Fait le 09/10/2026
 - **Priorité :** 🔴 Haute
-- **Fichier(s) :** `src/lib/store.ts:196-201`, `src/lib/news.ts:193-202`, `src/app/index.tsx:17-22`
+- **Fichier(s) :** `src/lib/store.ts`, `src/lib/news.ts`, `src/app/index.tsx`, `src/app/article/[id].tsx`
 - **Pourquoi :** `setNotice` crée un `setTimeout` jamais clearé. `readRSS` crée un `new AbortController()` par défaut même si un controller est passé. `key = ${category}:${reload}` recrée l'effet en boucle.
-- **Action :** Stocke `noticeTimeout` et `clearTimeout` avant chaque `setNotice`. Dans `readRSS(url, controller?)` : `const ctrl = controller ?? new AbortController()`. Enlève `key` des deps, garde `[category, reload, ready]`.
+- **Fait :**
+  - `setNotice` : `noticeTimer` stocké + `clearTimeout` avant chaque appel (test fake-timers : double appel identique ne s'efface plus en avance).
+  - `readRSS(url, controller?)` : `const ctrl = controller ?? new AbortController()` — plus d'instance jetable quand un controller est fourni.
+  - `index.tsx` + `article/[id].tsx` : `key` calculée dans l'effet, deps réduites à `[category, reload, ready]` / `[id, ready, retry]`.
 
 ### 8. Ajouter `ErrorBoundary` + écran d'erreur global
 - [ ] À faire
