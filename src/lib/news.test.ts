@@ -1,7 +1,7 @@
 import { test, assert, vi } from 'vitest';
 import { parseFeed, readHtml, getArticle, isArticle } from './news.ts';
 import { categories } from './categories.ts';
-import { getArticleId } from './article-link.ts';
+import { getArticleId, getArticleHref } from './article-link.ts';
 
 test('native reader preserves Arabic paragraphs and ignores HTML scripts, style and unsafe images', () => {
   const body = readHtml('<p>أخبار &amp; كرة</p><script>bad()</script><style>.hidden{}</style><img src="javascript:bad()"/><img src="https://sc1.hihi2.com/photo.jpg" onerror="bad()"/><p>التفاصيل &#8230;</p>');
@@ -38,3 +38,33 @@ test('direct mobile deep links load a single-post RSS without a previous news sc
   assert.equal((await getArticle('556677'))?.title, 'خبر مباشر');
   fetchSpy.mockRestore();
 });
+
+test('getArticleHref generates correct singular Expo Router path', () => {
+  assert.equal(getArticleHref('https://hihi2.com/p999.html'), '/article/999');
+  assert.equal(getArticleHref('https://hihi2.com/p999.html', 'europe'), '/article/999?category=europe');
+});
+
+test('clearNewsCache empties cache and getCacheStats reports zeroes', async () => {
+  const { clearNewsCache, getCacheStats } = await import('./news.ts');
+  await clearNewsCache();
+  const stats = await getCacheStats();
+  assert.equal(stats.feedCount, 0);
+  assert.equal(stats.articleCount, 0);
+});
+
+test('useAppStore manages retention days, font scaling, and cache actions', async () => {
+  const { useAppStore } = await import('./store.ts');
+  const store = useAppStore.getState();
+  
+  await store.setCacheRetentionDays(30);
+  assert.equal(useAppStore.getState().cacheRetentionDays, 30);
+  
+  store.increaseFontSize();
+  assert.equal(useAppStore.getState().fontSizeDelta, 2);
+  store.resetFontSize();
+  assert.equal(useAppStore.getState().fontSizeDelta, 0);
+
+  await store.clearCachedArticles();
+  assert.equal(useAppStore.getState().cacheStats.articleCount, 0);
+});
+

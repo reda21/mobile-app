@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { Parser } from 'htmlparser2';
 import { decode } from 'html-entities';
@@ -59,8 +60,135 @@ export function parseFeed(xml: string): Article[] {
   });
 }
 
+const memoryStore = new Map<string, string>();
+const safeStorage = {
+  async getItem(key: string): Promise<string | null> {
+    try {
+      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+        return memoryStore.get(key) ?? null;
+      }
+      return await AsyncStorage.getItem(key);
+    } catch {
+      return memoryStore.get(key) ?? null;
+    }
+  },
+  async setItem(key: string, value: string): Promise<void> {
+    try {
+      memoryStore.set(key, value);
+      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+        return;
+      }
+      await AsyncStorage.setItem(key, value);
+    } catch {}
+  },
+  async removeItem(key: string): Promise<void> {
+    try {
+      memoryStore.delete(key);
+      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+        return;
+      }
+      await AsyncStorage.removeItem(key);
+    } catch {}
+  }
+};
+
+const FEEDS_STORAGE_KEY = 'akhbar-news-feeds-cache-v1';
+const DETAILS_STORAGE_KEY = 'akhbar-news-details-cache-v1';
+
 const cache = new Map<CategoryId, NewsFeed>();
 const details = new Map<string, Article>();
+
+let persistenceLoaded = false;
+async function ensurePersistenceLoaded() {
+  if (persistenceLoaded) return;
+  persistenceLoaded = true;
+  try {
+    const rawFeeds = await safeStorage.getItem(FEEDS_STORAGE_KEY);
+    if (rawFeeds) {
+      const parsed = JSON.parse(rawFeeds) as Record<CategoryId, NewsFeed>;
+      for (const [key, feed] of Object.entries(parsed)) {
+        if (!cache.has(key as CategoryId)) {
+          cache.set(key as CategoryId, { ...feed, stale: true });
+        }
+      }
+    }
+    const rawDetails = await safeStorage.getItem(DETAILS_STORAGE_KEY);
+    if (rawDetails) {
+      const parsed = JSON.parse(rawDetails) as Record<string, Article>;
+      for (const [key, article] of Object.entries(parsed)) {
+        if (!details.has(key)) details.set(key, article);
+      }
+    }
+  } catch {}
+}
+
+async function persistFeeds() {
+  try {
+    const obj: Record<string, NewsFeed> = {};
+    for (const [k, v] of cache.entries()) obj[k] = v;
+    await safeStorage.setItem(FEEDS_STORAGE_KEY, JSON.stringify(obj));
+  } catch {}
+}
+
+async function persistDetails() {
+  try {
+    const obj: Record<string, Article> = {};
+    for (const [k, v] of details.entries()) obj[k] = v;
+    await safeStorage.setItem(DETAILS_STORAGE_KEY, JSON.stringify(obj));
+  } catch {}
+}
+
+export async function getCacheStats() {
+  await ensurePersistenceLoaded();
+  let totalArticles = details.size;
+  for (const feed of cache.values()) {
+    totalArticles += feed.articles.length;
+  }
+  return {
+    feedCount: cache.size,
+    articleCount: totalArticles,
+  };
+}
+
+export async function pruneExpiredArticles(retentionDays: number) {
+  if (retentionDays <= 0) return;
+  await ensurePersistenceLoaded();
+  const maxAgeMs = retentionDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  let changed = false;
+
+  for (const [key, feed] of cache.entries()) {
+    const feedAge = now - Date.parse(feed.fetchedAt);
+    if (feedAge > maxAgeMs) {
+      cache.delete(key);
+      changed = true;
+    }
+  }
+
+  for (const [id, article] of details.entries()) {
+    if (article.published) {
+      const pubAge = now - Date.parse(article.published);
+      if (pubAge > maxAgeMs) {
+        details.delete(id);
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    await Promise.all([persistFeeds(), persistDetails()]);
+  }
+}
+
+export async function clearNewsCache() {
+  cache.clear();
+  details.clear();
+  persistenceLoaded = true;
+  await Promise.all([
+    safeStorage.removeItem(FEEDS_STORAGE_KEY),
+    safeStorage.removeItem(DETAILS_STORAGE_KEY),
+  ]);
+}
 
 async function readRSS(url: string, controller = new AbortController()) {
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -76,33 +204,46 @@ async function readRSS(url: string, controller = new AbortController()) {
 export async function getNews(id: CategoryId, controller?: AbortController, refresh = false): Promise<NewsFeed> {
   const category = categories.find(c => c.id === id);
   if (!category) throw new Error('Unknown category');
+  await ensurePersistenceLoaded();
   const previous = cache.get(id);
-  if (!refresh && previous && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return previous;
+  if (!refresh && previous && !previous.stale && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return previous;
   try {
     const articles = await readRSS(`https://hihi2.com/category/${category.path}/feed`, controller);
     const feed: NewsFeed = { articles, category: id, fetchedAt: new Date().toISOString(), stale: false };
     cache.set(id, feed);
+    persistFeeds();
     return feed;
   } catch (error) {
-    if (!controller?.signal.aborted && previous) return { ...previous, stale: true };
+    if (previous) return { ...previous, stale: true };
     throw error;
   }
 }
 
 export async function getArticle(id: string, controller?: AbortController): Promise<Article | null> {
   if (!/^[1-9]\d{0,11}$/.test(id)) return null;
+  await ensurePersistenceLoaded();
   if (details.has(id)) return details.get(id)!;
   for (const feed of cache.values()) {
     const article = feed.articles.find(item => getArticleId(item.url) === id);
     if (article) return article;
   }
-  const articles = await readRSS(`https://hihi2.com/?feed=rss2&p=${id}&withoutcomments=1`, controller);
-  const article = articles.find(item => getArticleId(item.url) === id) ?? null;
-  if (article) {
-    if (details.size >= 100) details.delete(details.keys().next().value!);
-    details.set(id, article);
+  try {
+    const articles = await readRSS(`https://hihi2.com/?feed=rss2&p=${id}&withoutcomments=1`, controller);
+    const article = articles.find(item => getArticleId(item.url) === id) ?? null;
+    if (article) {
+      if (details.size >= 100) details.delete(details.keys().next().value!);
+      details.set(id, article);
+      persistDetails();
+    }
+    return article;
+  } catch (error) {
+    if (details.has(id)) return details.get(id)!;
+    for (const feed of cache.values()) {
+      const article = feed.articles.find(item => getArticleId(item.url) === id);
+      if (article) return article;
+    }
+    throw error;
   }
-  return article;
 }
 
 export function isArticle(value: unknown): value is Article {

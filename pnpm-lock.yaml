@@ -47,6 +47,9 @@ importers:
       expo-router:
         specifier: ~57.0.25
         version: 57.0.25(7035eab3852635aa69728ac16e5d44ae)
+      expo-speech:
+        specifier: ~57.0.3
+        version: 57.0.3(expo@57.0.27)
       expo-splash-screen:
         specifier: ~57.0.9
         version: 57.0.9(expo@57.0.27)(supports-color@8.1.1)(typescript@6.0.3)
@@ -101,6 +104,9 @@ importers:
       react-native-worklets:
         specifier: 0.10.1
         version: 0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)
+      zustand:
+        specifier: ^5.0.15
+        version: 5.0.15(@types/react@19.2.18)(react@19.2.3)
     devDependencies:
       '@react-native/metro-config':
         specifier: 0.86.3
@@ -2300,6 +2306,11 @@ packages:
     resolution: {integrity: sha512-aK+LdKzauHSGmsOStZtyxdzv0zWssCkxTw3m4QuOhfDSJsZaMRTd9O41d8ixU/QfELTbaJ0oRNcF7JFV/7O9YQ==}
     engines: {node: '>=20.16.0'}
 
+  expo-speech@57.0.3:
+    resolution: {integrity: sha512-rcO8izKziksrV4X3qQ5g+prFNTZmLYDEGEVnTvuvpOZDwjzP9nsdoaFymhY+qj9AJfMcpvR7Wshm+zpislyJBg==}
+    peerDependencies:
+      expo: '*'
+
   expo-splash-screen@57.0.9:
     resolution: {integrity: sha512-7cKDn7uBwg0RkcmY015/5j9st4msWJ4zQiPmQdVZoppW3cFSbv05n7xhM6CjUU466Tx4VRTqDF21HuIHkmnEtA==}
     peerDependencies:
@@ -4249,6 +4260,24 @@ packages:
 
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
+  zustand@5.0.15:
+    resolution: {integrity: sha512-MpSEjRiBkA9crSYeOUH32rJC7SVqAbm0Fqcqge/bUi2PPoLcBWKOsG+C8mevmpr8TwXHBVkChbbJiyvkE+i/3A==}
+    engines: {node: '>=12.20.0'}
+    peerDependencies:
+      '@types/react': '>=18.0.0'
+      immer: '>=9.0.6'
+      react: '>=18.0.0'
+      use-sync-external-store: '>=1.2.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      immer:
+        optional: true
+      react:
+        optional: true
+      use-sync-external-store:
+        optional: true
 
 snapshots:
 
@@ -6922,6 +6951,10 @@ snapshots:
 
   expo-server@57.0.3: {}
 
+  expo-speech@57.0.3(expo@57.0.27):
+    dependencies:
+      expo: 57.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@57.0.1)(@expo/metro-runtime@57.0.16)(expo-router@57.0.25)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.4(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)(typescript@6.0.3)
+
   expo-splash-screen@57.0.9(expo@57.0.27)(supports-color@8.1.1)(typescript@6.0.3):
     dependencies:
       '@expo/config-plugins': 57.0.10(supports-color@8.1.1)(typescript@6.0.3)
@@ -9131,3 +9164,8 @@ snapshots:
       zod: 3.25.76
 
   zod@3.25.76: {}
+
+  zustand@5.0.15(@types/react@19.2.18)(react@19.2.3):
+    optionalDependencies:
+      '@types/react': 19.2.18
+      react: 19.2.3

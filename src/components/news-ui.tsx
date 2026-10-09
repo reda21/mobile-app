@@ -20,6 +20,11 @@ const paths = {
   sun: 'M12 1v2m0 18v2M1 12h2m18 0h2M17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0',
   refresh: 'M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 3M4 16l2 3a8 8 0 0 0 13-3',
   external: 'M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5',
+  speaker: 'M11 5 6 9H2v6h4l5 4V5Zm4.5 3.5a5 5 0 0 1 0 7m2.5-9.5a8.5 8.5 0 0 1 0 12',
+  stop: 'M6 6h12v12H6z',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.4 1.4-1 .6a8.5 8.5 0 0 1-.8 1.4l.4 1.1a1 1 0 0 1-.3 1.2l-1.4 1.4a1 1 0 0 1-1.2.3l-1.1-.4a8.5 8.5 0 0 1-1.4.8l-.6 1a1 1 0 0 1-1.1.5h-2a1 1 0 0 1-1.1-.5l-.6-1a8.5 8.5 0 0 1-1.4-.8l-1.1.4a1 1 0 0 1-1.2-.3L3.1 19.5a1 1 0 0 1-.3-1.2l.4-1.1a8.5 8.5 0 0 1-.8-1.4l-1-.6a1 1 0 0 1-.5-1.1v-2a1 1 0 0 1 .5-1.1l1-.6a8.5 8.5 0 0 1 .8-1.4l-.4-1.1a1 1 0 0 1 .3-1.2l1.4-1.4a1 1 0 0 1 1.2-.3l1.1.4a8.5 8.5 0 0 1 1.4-.8l.6-1a1 1 0 0 1 1.1-.5h2a1 1 0 0 1 1.1.5l.6 1a8.5 8.5 0 0 1 1.4.8l1.1-.4a1 1 0 0 1 1.2.3l1.4 1.4a1 1 0 0 1 .3 1.2l-.4 1.1a8.5 8.5 0 0 1 .8 1.4l1 .6a1 1 0 0 1 .5 1.1v2a1 1 0 0 1-.5 1.1Z',
+  trash: 'M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-15v5l3 3',
 };
 export function Icon({ name, color, size = 21, filled = false }: { name: keyof typeof paths; color?: string; size?: number; filled?: boolean }) {
   const { colors } = usePreferences();
@@ -33,7 +38,7 @@ export function ArabicText({ style, ...props }: TextProps) {
   const { colors } = usePreferences();
   return <Text {...props} style={[ui.text, { color: colors.ink }, style]}/>;
 }
-export function Frame({ children, bottom }: { children: ReactNode; bottom?: 'news' | 'categories' | 'saved' }) {
+export function Frame({ children, bottom }: { children: ReactNode; bottom?: 'news' | 'categories' | 'saved' | 'settings' }) {
   const { colors, notice } = usePreferences();
   return <View style={[{ flex: 1, backgroundColor: colors.paper }, Platform.OS !== 'web' && { direction: 'ltr' }]}><SafeAreaView edges={['top', 'left', 'right']} style={[ui.frame, { backgroundColor: colors.paper }]}>{children}{bottom && <BottomNav active={bottom}/>}{!!notice && <View style={[ui.notice, { backgroundColor: colors.ink }]} accessibilityLiveRegion="polite"><ArabicText style={{ color: colors.paper, fontSize: 12 }}>{notice}</ArabicText></View>}</SafeAreaView></View>;
 }
@@ -41,13 +46,19 @@ export function Header({ back = false }: { back?: boolean }) {
   const { colors, dark, toggleTheme } = usePreferences();
   return <View style={[ui.header, ui.row, { borderBottomColor: colors.line }]}>
     <View style={[ui.row, { flex: 1, gap: 10 }]}><Ball/><View><ArabicText style={{ fontFamily: fonts.heading, fontSize: 14 }}>{APP_NAME}</ArabicText><ArabicText style={{ fontSize: 10, color: colors.muted }}>العالم يتكلم كرة</ArabicText></View></View>
-    {back && <Pressable accessibilityRole="button" accessibilityLabel="العودة إلى الأخبار" hitSlop={8} style={ui.iconButton} onPress={() => router.canGoBack() ? router.back() : router.replace('/')}><Icon name="arrow"/></Pressable>}
+    {back && <Pressable accessibilityRole="button" accessibilityLabel="العودة" hitSlop={8} style={ui.iconButton} onPress={() => router.canGoBack() ? router.back() : router.replace('/')}><Icon name="arrow"/></Pressable>}
+    <Pressable accessibilityRole="button" accessibilityLabel="الإعدادات" hitSlop={8} style={ui.iconButton} onPress={() => router.push('/settings')}><Icon name="settings"/></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={dark ? 'تفعيل الوضع النهاري' : 'تفعيل الوضع الليلي'} hitSlop={8} style={ui.iconButton} onPress={toggleTheme}><Icon name={dark ? 'sun' : 'moon'}/></Pressable>
   </View>;
 }
-function BottomNav({ active }: { active: 'news' | 'categories' | 'saved' }) {
+function BottomNav({ active }: { active: 'news' | 'categories' | 'saved' | 'settings' }) {
   const { colors, saved } = usePreferences();
-  const tabs = [{ id: 'news', label: 'الأخبار', icon: 'home', href: '/' }, { id: 'categories', label: 'الأقسام', icon: 'grid', href: '/categories' }, { id: 'saved', label: 'المحفوظات', icon: 'bookmark', href: '/saved' }] as const;
+  const tabs = [
+    { id: 'news', label: 'الأخبار', icon: 'home', href: '/' },
+    { id: 'categories', label: 'الأقسام', icon: 'grid', href: '/categories' },
+    { id: 'saved', label: 'المحفوظات', icon: 'bookmark', href: '/saved' },
+    { id: 'settings', label: 'الإعدادات', icon: 'settings', href: '/settings' },
+  ] as const;
   return <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.surface }}><View style={[ui.bottom, ui.row, { borderTopColor: colors.line }]}>{tabs.map(tab => <Pressable key={tab.id} accessibilityRole="button" accessibilityLabel={tab.label} accessibilityState={{ selected: active === tab.id }} onPress={() => router.replace(tab.href)} style={ui.tab}><View style={[ui.tabIcon, active === tab.id && { backgroundColor: colors.soft }]}><Icon name={tab.icon} color={active === tab.id ? colors.green : colors.muted}/></View><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: active === tab.id ? colors.green : colors.muted }}>{tab.label}{tab.id === 'saved' && saved.length ? ` (${saved.length.toLocaleString('ar')})` : ''}</ArabicText></Pressable>)}</View></SafeAreaView>;
 }
 export function Photo({ article, style }: { article: Article; style?: ViewStyle }) {

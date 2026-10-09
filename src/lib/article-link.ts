@@ -9,5 +9,5 @@ export function getArticleId(sourceUrl: string): string | null {
 
 export function getArticleHref(sourceUrl: string, category: CategoryId = "latest"): string {
   const id = getArticleId(sourceUrl);
-  return `/articles/${id ?? "unknown"}${category === "latest" ? "" : `?category=${category}`}`;
+  return `/article/${id ?? "unknown"}${category === "latest" ? "" : `?category=${category}`}`;
 }
