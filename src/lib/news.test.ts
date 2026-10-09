@@ -1,5 +1,4 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { test, assert, vi } from 'vitest';
 import { parseFeed, readHtml, getArticle, isArticle } from './news.ts';
 import { categories } from './categories.ts';
 import { getArticleId } from './article-link.ts';
@@ -31,10 +30,11 @@ test('25 categories include the 14 requested clubs and article links accept only
   assert.equal(await getArticle('../../outside'), null);
 });
 
-test('direct mobile deep links load a single-post RSS without a previous news screen', async (t) => {
-  t.mock.method(globalThis, 'fetch', async (url: string) => {
+test('direct mobile deep links load a single-post RSS without a previous news screen', async () => {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
     assert.equal(url, 'https://hihi2.com/?feed=rss2&p=556677&withoutcomments=1');
     return new Response('<rss><channel><item><title>خبر مباشر</title><link>https://hihi2.com/p556677.html</link><description>تفاصيل الخبر</description></item></channel></rss>');
   });
   assert.equal((await getArticle('556677'))?.title, 'خبر مباشر');
+  fetchSpy.mockRestore();
 });

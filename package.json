@@ -39,7 +39,8 @@
     "@react-native/metro-config": "0.86.3",
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.3"
   },
   "scripts": {
     "start": "expo start",
@@ -47,8 +48,19 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "check": "expo lint && tsc --noEmit",
+    "check:test": "expo lint && tsc --noEmit && vitest run",
+    "build:apk": "eas build -p android --profile release-apk",
+    "build:apk:preview": "eas build -p android --profile preview",
+    "build:aab": "eas build -p android --profile production",
+    "submit:android": "eas submit -p android --profile production",
+    "wf:submit-android": "npx eas-cli@latest workflow:run submit-android.yml",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest run --watch",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/lib/news.test.ts"
+    "doctor": "npx expo-doctor"
   },
   "private": true
 }
