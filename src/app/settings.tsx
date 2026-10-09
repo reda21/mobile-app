@@ -1,10 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { usePreferences } from '../lib/preferences';
-import { getNotificationPermission, requestNotificationPermission } from '../lib/local-notifications';
+import { getNotificationPermission, requestNotificationPermission, setDailyNewsReminder } from '../lib/local-notifications';
+import { categories } from '../lib/categories';
+import { reportProblem } from '../lib/feedback';
+import { router } from 'expo-router';
 import { checkForNewNews } from '../lib/news-watcher';
 import { showToast } from '../lib/toast';
+import { useAppUpdates, type UpdateStatus } from '../hooks/use-app-updates';
+import Constants from 'expo-constants';
 import { ArabicText, Frame, Header, Icon, fonts, ui } from '../components/news-ui';
+
+const updateStatusLabel: Record<UpdateStatus, string> = {
+  disabled: 'التحديثات تعمل في نسخة الإنتاج فقط',
+  idle: 'اضغط للتحقق من وجود تحديث',
+  checking: 'جارٍ التحقق...',
+  downloading: 'جارٍ تنزيل التحديث...',
+  ready: 'التحديث جاهز — أعد التشغيل للتطبيق',
+  'up-to-date': 'تطبيقك محدّث ✅',
+  error: 'تعذر التحقق',
+};
 
 export default function SettingsScreen() {
   const {
@@ -14,12 +29,17 @@ export default function SettingsScreen() {
     clearCachedArticles, clearSaved,
     cacheStats, refreshCacheStats, saved,
     notifyNewNews, setNotifyNewNews, autoCheckNewNews, setAutoCheckNewNews, category,
+    dailyReminder, setDailyReminder, alertCategories, toggleAlertCategory,
+    analyticsEnabled, setAnalyticsEnabled, appVisits,
   } = usePreferences();
 
   const [clearingCache, setClearingCache] = useState(false);
   const [clearingSaved, setClearingSaved] = useState(false);
   const [perm, setPerm] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
   const [checkingNews, setCheckingNews] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
+  const appUpdates = useAppUpdates();
+  const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
   useEffect(() => {
     refreshCacheStats();
@@ -192,7 +212,7 @@ export default function SettingsScreen() {
           <View style={[ui.row, styles.settingRow]}>
             <View style={{ flex: 1 }}>
               <ArabicText style={{ fontFamily: fonts.medium, fontSize: 13 }}>فحص تلقائي كل 3 دقائق</ArabicText>
-              <ArabicText style={{ fontSize: 11, color: colors.muted }}>نظام يتحقق من الأخبار الجديدة في الخلفية</ArabicText>
+              <ArabicText style={{ fontSize: 11, color: colors.muted }}>يتحقق من الأقسام المختارة أثناء استخدام التطبيق</ArabicText>
             </View>
             <Switch
               value={autoCheckNewNews}
@@ -210,9 +230,13 @@ export default function SettingsScreen() {
               </ArabicText>
             </View>
             <Switch
-              value={notifyNewNews}
+              value={notifyNewNews && perm === 'granted'}
               onValueChange={async (v) => {
                 if (v) {
+                  if (appVisits < 2 && perm !== 'granted') {
+                    void showToast({ title: 'جرّب التطبيق أولًا', message: 'يمكن تفعيل التنبيهات بدءًا من الزيارة الثانية.' });
+                    return;
+                  }
                   const ok = await requestNotificationPermission().catch(() => false);
                   setPerm(await getNotificationPermission().catch(() => 'undetermined' as const));
                   if (!ok) {
@@ -225,6 +249,26 @@ export default function SettingsScreen() {
               trackColor={{ false: colors.line, true: colors.green }}
               thumbColor={colors.paper}
             />
+          </View>
+
+          <ArabicText style={{ fontSize: 12, color: colors.muted, marginTop: 12 }}>الأقسام التي تريد تنبيهاتها:</ArabicText>
+          <View style={[ui.row, { flexWrap: 'wrap', gap: 8, marginVertical: 12 }]}>
+            {categories.map(item => <Pressable key={item.id} accessibilityRole="checkbox" accessibilityLabel={item.name} accessibilityState={{ checked: alertCategories.includes(item.id) }} onPress={() => toggleAlertCategory(item.id)} style={{ padding: 8, borderRadius: 5, backgroundColor: alertCategories.includes(item.id) ? colors.soft : colors.paper }}><ArabicText style={{ fontSize: 11 }}>{item.name}</ArabicText></Pressable>)}
+          </View>
+          <View style={[ui.row, styles.settingRow]}>
+            <View style={{ flex: 1 }}><ArabicText style={{ fontSize: 13, fontFamily: fonts.medium }}>تذكير يومي بأهم الأخبار</ArabicText><ArabicText style={{ fontSize: 11, color: colors.muted }}>الساعة ١٩:٠٠ حسب وقت هاتفك</ArabicText></View>
+            <Switch accessibilityLabel="تذكير يومي" value={dailyReminder} disabled={scheduling || Platform.OS === 'web'} onValueChange={async enabled => {
+              setScheduling(true);
+              try {
+                if (enabled && !await requestNotificationPermission()) {
+                  void showToast({ title: appVisits < 2 ? 'متاح بدءًا من الزيارة الثانية' : 'اسمح بالإشعارات من إعدادات الهاتف' });
+                  return;
+                }
+                if (await setDailyNewsReminder(enabled)) setDailyReminder(enabled);
+                setPerm(await getNotificationPermission());
+              } catch { void showToast({ title: 'تعذر ضبط التذكير. حاول مرة أخرى.' }); }
+              finally { setScheduling(false); }
+            }} trackColor={{ false: colors.line, true: colors.green }} thumbColor={colors.paper}/>
           </View>
 
           <Pressable
@@ -256,7 +300,7 @@ export default function SettingsScreen() {
                 {checkingNews ? 'جارٍ الفحص...' : 'فحص الأخبار الجديدة الآن'}
               </ArabicText>
             </View>
-            <ArabicText style={{ fontSize: 10, color: colors.muted }}>react-call + watcher</ArabicText>
+            <ArabicText style={{ fontSize: 10, color: colors.muted }}>آخر الأخبار</ArabicText>
           </Pressable>
         </View>
 
@@ -320,10 +364,55 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Section mises à jour OTA (EAS Update) */}
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+          <View style={[ui.row, styles.sectionHeader]}>
+            <Icon name="refresh" size={20} color={colors.green} />
+            <ArabicText style={[styles.sectionTitle, { color: colors.ink }]}>تحديثات التطبيق</ArabicText>
+          </View>
+
+          <View style={[ui.row, styles.statRow, { borderTopColor: colors.line, borderBottomColor: colors.line }]}>
+            <ArabicText style={{ fontSize: 12, color: colors.muted }}>الإصدار والقناة:</ArabicText>
+            <ArabicText style={{ fontSize: 12, fontFamily: fonts.bold, color: colors.ink }}>
+              {appVersion}{appUpdates.channel ? ` • ${appUpdates.channel}` : ''}
+            </ArabicText>
+          </View>
+
+          <ArabicText style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>
+            {updateStatusLabel[appUpdates.status]}
+            {appUpdates.status === 'error' && appUpdates.error ? ` — ${appUpdates.error}` : ''}
+          </ArabicText>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="التحقق من تحديثات التطبيق"
+            onPress={() => { void appUpdates.checkNow(); }}
+            disabled={!appUpdates.supported || appUpdates.status === 'checking' || appUpdates.status === 'downloading'}
+            style={[ui.row, styles.actionButton, { backgroundColor: colors.paper, borderColor: colors.line, opacity: appUpdates.supported ? 1 : 0.45 }]}
+          >
+            <View style={[ui.row, { gap: 8 }]}>
+              <Icon name="refresh" size={17} color={colors.green} />
+              <ArabicText style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.ink }}>
+                {appUpdates.status === 'checking' || appUpdates.status === 'downloading' ? 'جارٍ العمل...' : 'التحقق من التحديثات'}
+              </ArabicText>
+            </View>
+            <ArabicText style={{ fontSize: 10, color: colors.muted }}>EAS Update</ArabicText>
+          </Pressable>
+        </View>
+
         {/* Section 3: App info */}
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+          <ArabicText accessibilityRole="header" style={styles.sectionTitle}>الخصوصية والمساعدة</ArabicText>
+          <View style={[ui.row, styles.settingRow]}>
+            <View style={{ flex: 1 }}><ArabicText style={{ fontSize: 13 }}>المساعدة في تحسين التطبيق</ArabicText><ArabicText style={{ fontSize: 11, color: colors.muted }}>مقاييس استخدام اختيارية دون نص البحث أو محتوى الأخبار</ArabicText></View>
+            <Switch accessibilityLabel="مقاييس الاستخدام الاختيارية" value={analyticsEnabled} onValueChange={setAnalyticsEnabled} trackColor={{ false: colors.line, true: colors.green }} thumbColor={colors.paper}/>
+          </View>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/privacy')} style={[styles.actionButton, { borderColor: colors.line, marginTop: 10 }]}><ArabicText>سياسة الخصوصية</ArabicText></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => { void reportProblem().catch(() => { void showToast({ title: 'تعذر فتح المشاركة' }); }); }} style={[styles.actionButton, { borderColor: colors.line, marginTop: 10 }]}><ArabicText>الإبلاغ عن مشكلة</ArabicText></Pressable>
+        </View>
         <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.line, alignItems: 'center', paddingVertical: 18 }]}>
           <ArabicText style={{ fontFamily: fonts.bold, fontSize: 13, marginBottom: 4 }}>أخبار الكرة العالمية</ArabicText>
-          <ArabicText style={{ fontSize: 11, color: colors.muted }}>الإصدار 1.0.0 • متوافق مع نظام Pinia/Zustand</ArabicText>
+          <ArabicText style={{ fontSize: 11, color: colors.muted }}>الإصدار {appVersion}</ArabicText>
           <ArabicText style={{ fontSize: 10, color: colors.green, marginTop: 6 }}>المصدر الإخباري: هاي كورة (hihi2.com)</ArabicText>
         </View>
       </ScrollView>

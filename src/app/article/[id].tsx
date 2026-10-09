@@ -4,12 +4,18 @@ import { useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { getArticle, type Article } from '../../lib/news';
 import { getArticleId } from '../../lib/article-link';
+import { formatDateAr } from '../../lib/format';
+import { t } from '../../lib/i18n';
+import { track } from '../../lib/analytics';
 import { usePreferences } from '../../lib/preferences';
 import { ArabicText, Bookmark, EmptyState, Frame, Header, Icon, Photo, fonts, ui } from '../../components/news-ui';
 
 export default function ArticleScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = typeof params.id === 'string' ? params.id : '';
+  useEffect(() => {
+    if (/^[1-9]\d{0,11}$/.test(id)) void track('article_open', { article_id: id });
+  }, [id]);
   const { colors, saved, ready, fontSizeDelta, increaseFontSize, decreaseFontSize } = usePreferences();
   const stored = saved.find(a => getArticleId(a.url) === id);
   const [result, setResult] = useState<{ key: string; article: Article | null; error?: string } | null>(null);
@@ -41,7 +47,8 @@ export default function ArticleScreen() {
 
   async function share() {
     if (!article) return;
-    try { await Share.share({ title: article.title, message: `${article.title}\n${article.url}` }); } catch { setActionError('تعذرت مشاركة الخبر.'); }
+    const deepLink = `akhbarkora://article/${id}`;
+    try { await Share.share({ title: article.title, message: `${article.title}\n${article.url}\nافتح في التطبيق: ${deepLink}` }); } catch { setActionError('تعذرت مشاركة الخبر.'); }
   }
 
   function toggleSpeech() {
@@ -63,7 +70,7 @@ export default function ArticleScreen() {
   }
 
   return <Frame><Header back/><ScrollView contentContainerStyle={styles.content}>{loading ? <EmptyState loading title="جار تحميل الخبر"/> : !article ? <EmptyState title={error ? 'الأخبار ستعود قريبًا' : 'هذا الخبر غير موجود'} message={error || 'قد يكون الرابط غير صحيح أو لم يعد الخبر متاحًا.'} retry={error ? () => setRetry(r => r + 1) : undefined}/> : <View>
-    <View style={[ui.row, { justifyContent: 'space-between', marginBottom: 13 }]}><ArabicText style={{ color: colors.green, fontFamily: fonts.medium, fontSize: 11 }}>{article.tags[0] || 'كرة القدم'} • هاي كورة</ArabicText><View style={ui.row}><Bookmark article={article}/><Pressable accessibilityRole="button" accessibilityLabel="مشاركة الخبر" onPress={share} style={ui.iconButton}><Icon name="external" size={18} color={colors.green}/></Pressable></View></View>
+    <View style={[ui.row, { justifyContent: 'space-between', marginBottom: 13 }]}><ArabicText style={{ color: colors.green, fontFamily: fonts.medium, fontSize: 11 }}>{article.tags[0] || t('football')} • {t('sourceName')}</ArabicText><View style={ui.row}><Bookmark article={article}/><Pressable accessibilityRole="button" accessibilityLabel="مشاركة الخبر" accessibilityHint="اضغط لمشاركة الخبر" onPress={share} style={ui.iconButton}><Icon name="external" size={18} color={colors.green}/></Pressable></View></View>
     
     <View style={[styles.toolbar, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}>
       <Pressable accessibilityRole="button" accessibilityLabel={speaking ? 'إيقاف القراءة الصوتية' : 'استمع إلى الخبر'} onPress={toggleSpeech} style={[ui.row, styles.audioButton, { backgroundColor: speaking ? colors.soft : 'transparent' }]}>
@@ -81,8 +88,8 @@ export default function ArticleScreen() {
       </View>
     </View>
 
-    <ArabicText accessibilityRole="header" style={[styles.title, { fontSize: 23 + fontSizeDelta, lineHeight: 43 + fontSizeDelta * 1.5 }]}>{article.title}</ArabicText>
-    {article.published && <ArabicText style={{ color: colors.muted, fontSize: 10, marginBottom: 22 }}>{new Intl.DateTimeFormat('ar', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(article.published))}</ArabicText>}
+    <ArabicText accessible accessibilityRole="header" accessibilityHint="عنوان الخبر" maxFontSizeMultiplier={1.3} style={[styles.title, { fontSize: 23 + fontSizeDelta, lineHeight: 43 + fontSizeDelta * 1.5 }]}>{article.title}</ArabicText>
+    {article.published && <ArabicText style={{ color: colors.muted, fontSize: 10, marginBottom: 22 }}>{formatDateAr(article.published, 'long')}</ArabicText>}
     {article.image && <Photo article={article} style={{ marginBottom: 22 }}/>}
     {(paragraphs.length ? paragraphs : ['نص الخبر الكامل متوفر بعد الاتصال بالإنترنت.']).map((paragraph, index) => <ArabicText key={index} selectable style={[styles.paragraph, { fontSize: 16 + fontSizeDelta, lineHeight: 33 + fontSizeDelta * 1.5 }]}>{paragraph}</ArabicText>)}
     <Pressable accessibilityRole="link" accessibilityLabel="اقرأ الخبر على هاي كورة" onPress={() => Linking.openURL(article.url).catch(() => setActionError('تعذر فتح المصدر.'))} style={[ui.row, { gap: 10, alignSelf: 'flex-end', marginTop: 15 }]}><ArabicText style={{ color: colors.green, fontFamily: fonts.bold, fontSize: 12 }}>اقرأ الخبر على هاي كورة</ArabicText><Icon name="external" size={15} color={colors.green}/></Pressable>

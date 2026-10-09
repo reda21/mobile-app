@@ -4,19 +4,25 @@ import { FlashList } from '@shopify/flash-list';
 import { categories, type CategoryId } from '../lib/categories';
 import { getNews, type Article, type NewsFeed } from '../lib/news';
 import { filterArticles } from '../lib/search';
+import { formatCount } from '../lib/format';
+import { t } from '../lib/i18n';
+import { track } from '../lib/analytics';
 import { markCategorySeen } from '../lib/news-watcher';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useNewsWatcher } from '../hooks/use-news-watcher';
 import { usePreferences } from '../lib/preferences';
+import { useNetworkStatus } from '../lib/network';
 import { ArabicText, EmptyState, Frame, Header, Icon, NewsRow, fonts, ui } from '../components/news-ui';
 
 const PAGE_SIZE = 12;
 
 export default function NewsScreen() {
   const { category, selectCategory, colors, ready } = usePreferences();
+  const { isOffline } = useNetworkStatus();
   const [result, setResult] = useState<{ key: string; feed?: NewsFeed; error?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [reload, setReload] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [pageState, setPageState] = useState({ cat: category, count: PAGE_SIZE });
   // Reset pagination quand la catégorie change (ajustement au rendu, pas d'effet).
   if (pageState.cat !== category) setPageState({ cat: category, count: PAGE_SIZE });
@@ -29,12 +35,30 @@ export default function NewsScreen() {
     if (!ready) return;
     const key = `${category}:${reload}`;
     const controller = new AbortController();
-    getNews(category, controller, reload > 0).then(feed => { if (!controller.signal.aborted) setResult({ key, feed }); }).catch(() => { if (!controller.signal.aborted) setResult({ key, error: 'تعذر تحميل الأخبار. تحقق من اتصالك وحاول مرة أخرى.' }); });
+    const started = Date.now();
+    getNews(category, controller, reload > 0)
+      .then(feed => {
+        if (!controller.signal.aborted) {
+          setResult({ key, feed });
+          setIsRefreshing(false);
+          void track('feed_view', { category, count: feed.articles.length, stale: feed.stale, duration_ms: Date.now() - started });
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setResult({ key, error: 'تعذر تحميل الأخبار. تحقق من اتصالك وحاول مرة أخرى.' });
+          void track('feed_error', { category, duration_ms: Date.now() - started });
+          setIsRefreshing(false);
+        }
+      });
     return () => controller.abort();
   }, [category, reload, ready]);
   const trimmedQuery = query.trim();
   const debouncedQuery = useDebouncedValue(trimmedQuery, 250);
   const isSearching = trimmedQuery !== debouncedQuery;
+  useEffect(() => {
+    if (debouncedQuery) void track('search', { category, query_length: debouncedQuery.length });
+  }, [debouncedQuery, category]);
   const articles = useMemo(
     () => (feed?.category === category ? filterArticles(feed.articles, debouncedQuery) : []),
     [feed, category, debouncedQuery],
@@ -63,8 +87,18 @@ export default function NewsScreen() {
   ), []);
   const keyExtractor = useCallback((item: Article) => item.id, []);
   const getItemType = useCallback((_: Article, index: number) => (index === 0 ? 'hero' : 'row'), []);
-  const handleRefresh = useCallback(() => setReload(r => r + 1), []);
+  const handleRefresh = useCallback(() => {
+    setIsRefreshing(true);
+    setReload(r => r + 1);
+  }, []);
   return <Frame bottom="news"><View style={[styles.topline, ui.row]}><ArabicText style={styles.live}>●  تغطية مستمرة</ArabicText><ArabicText style={styles.live}>شغف واحد. عالم كامل.</ArabicText></View><Header/>
+    {isOffline && (
+      <View style={[styles.offlineBanner, ui.row]}>
+        <ArabicText style={styles.offlineBannerText}>
+          📡 وضع عدم الاتصال — يتم تصفح الأخبار المحفوظة محليًا
+        </ArabicText>
+      </View>
+    )}
     <View style={[styles.tabs, ui.row, { borderBottomColor: colors.line }]}>{tabs.map(id => <Pressable key={id} accessibilityRole="button" accessibilityLabel={categories.find(c => c.id === id)!.name} accessibilityState={{ selected: category === id }} onPress={() => { setQuery(''); selectCategory(id); watcher.clearFresh(); }} style={[styles.tab, { borderBottomColor: category === id ? colors.green : 'transparent' }]}><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: category === id ? colors.green : colors.muted }}>{categories.find(c => c.id === id)!.name}</ArabicText></Pressable>)}</View>
     {watcher.freshCount > 0 && (
       <Pressable
@@ -78,9 +112,9 @@ export default function NewsScreen() {
         </ArabicText>
       </Pressable>
     )}
-    <FlashList data={visibleArticles} keyExtractor={keyExtractor} renderItem={renderItem} getItemType={getItemType} drawDistance={600} onEndReached={showMore} onEndReachedThreshold={0.5} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={loading && !!feed} onRefresh={handleRefresh} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : isSearching ? 'جارٍ البحث…' : `${articles.length.toLocaleString('ar')} خبر • المصدر: هاي كورة`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" onPress={handleRefresh} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}</View>}
+    <FlashList data={visibleArticles} keyExtractor={keyExtractor} renderItem={renderItem} getItemType={getItemType} drawDistance={600} onEndReached={showMore} onEndReachedThreshold={0.5} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" accessibilityHint="اكتب كلمة للبحث في أخبار القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : isSearching ? 'جارٍ البحث…' : `${formatCount(articles.length)} خبر • ${t('sourceName')}`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" accessibilityHint="اضغط لإعادة تحميل الأخبار" onPress={handleRefresh} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}</View>}
       ListEmptyComponent={<EmptyState loading={loading} title={loading ? 'أحدث الأخبار في الطريق' : error ? 'الأخبار ستعود قريبًا' : query ? 'لم نجد خبرًا بهذا العنوان' : 'لا توجد أخبار الآن'} message={error || (query ? 'جرّب كلمة أخرى للبحث.' : undefined)} retry={error ? handleRefresh : undefined}/>}
-      ListFooterComponent={remaining > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`عرض ${remaining} أخبار إضافية`} onPress={showMore} style={[styles.moreButton, { borderColor: colors.line, backgroundColor: colors.surface }]}><ArabicText style={[styles.moreButtonText, { color: colors.green }]}>عرض المزيد ({remaining.toLocaleString('ar')})</ArabicText></Pressable> : undefined}/>
+      ListFooterComponent={remaining > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`عرض ${remaining} أخبار إضافية`} accessibilityHint="اضغط لتحميل المزيد من الأخبار" onPress={showMore} style={[styles.moreButton, { borderColor: colors.line, backgroundColor: colors.surface }]}><ArabicText style={[styles.moreButtonText, { color: colors.green }]}>عرض المزيد ({formatCount(remaining)})</ArabicText></Pressable> : undefined}/>
   </Frame>;
 }
 const styles = StyleSheet.create({
@@ -94,6 +128,8 @@ const styles = StyleSheet.create({
   status: { borderTopWidth: 1, marginTop: 21, marginBottom: 12, paddingTop: 8, justifyContent: 'space-between' },
   newBanner: { marginHorizontal: 20, marginTop: 12, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center' },
   newBannerText: { color: '#fff', fontFamily: fonts.bold, fontSize: 12 },
+  offlineBanner: { backgroundColor: '#4A5568', paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  offlineBannerText: { color: '#FAFBF8', fontSize: 11, fontFamily: fonts.medium },
   moreButton: { marginTop: 16, marginBottom: 8, borderWidth: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
   moreButtonText: { fontFamily: fonts.bold, fontSize: 12 },
 });

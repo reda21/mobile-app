@@ -2,11 +2,26 @@
   "expo": {
     "name": "اخبار الكرة العالمية",
     "slug": "akhbar-al-kora",
+    "description": "أخبار الكرة العالمية: أخبار عربية، أقسام وأندية، محفوظات وقراءة دون اتصال.",
+    "extra": {
+      "privacyPolicyRoute": "/privacy",
+      "router": {},
+      "eas": {
+        "projectId": "ac8994b9-af0c-4c86-9510-7126832cb33d"
+      }
+    },
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "akhbarkora",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/YOUR_EAS_PROJECT_ID",
+      "checkAutomatically": "ON_LOAD"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.akhbarkora.mobile",
@@ -29,7 +44,9 @@
       "output": "single",
       "favicon": "./assets/images/favicon.png",
       "name": "اخبار الكرة العالمية",
-      "shortName": "اخبار الكرة العالمية"
+      "shortName": "اخبار الكرة العالمية",
+      "lang": "ar",
+      "dir": "rtl"
     },
     "plugins": [
       "expo-router",

@@ -4,6 +4,22 @@ import { Parser } from 'htmlparser2';
 import { decode } from 'html-entities';
 import { categories, isSourceUrl, type CategoryId } from './categories.ts';
 import { getArticleId } from './article-link.ts';
+import { isNativeRuntime } from './runtime.ts';
+
+type OnlineChecker = () => Promise<boolean>;
+let activeOnlineChecker: OnlineChecker = async () => true;
+
+export function setOnlineChecker(checker: OnlineChecker): void {
+  activeOnlineChecker = checker;
+}
+
+export async function isOnline(): Promise<boolean> {
+  try {
+    return await activeOnlineChecker();
+  } catch {
+    return true;
+  }
+}
 
 export interface Article {
   id: string; title: string; url: string; published: string | null;
@@ -38,12 +54,25 @@ export function readHtml(html: string) {
 
 const plainText = (value: unknown) => readHtml(typeof value === 'string' ? value : '').paragraphs.join(' ');
 
+interface RssItem {
+  title?: unknown;
+  link?: unknown;
+  pubDate?: unknown;
+  description?: unknown;
+  category?: unknown;
+  'content:encoded'?: unknown;
+}
+
+interface RssChannel {
+  item?: RssItem | RssItem[];
+}
+
 export function parseFeed(xml: string): Article[] {
   if (XMLValidator.validate(xml) !== true) throw new Error('Invalid RSS');
-  const data = new XMLParser({ parseTagValue: false, htmlEntities: true }).parse(xml);
+  const data = new XMLParser({ parseTagValue: false, htmlEntities: true }).parse(xml) as unknown as { rss?: { channel?: RssChannel } };
   if (!data?.rss?.channel) throw new Error('Missing RSS channel');
   const raw = data.rss.channel.item ?? [];
-  const items = Array.isArray(raw) ? raw : [raw];
+  const items: RssItem[] = Array.isArray(raw) ? raw : [raw];
   const seen = new Set<string>();
   return items.flatMap((item): Article[] => {
     const title = plainText(item.title);
@@ -64,7 +93,7 @@ const memoryStore = new Map<string, string>();
 const safeStorage = {
   async getItem(key: string): Promise<string | null> {
     try {
-      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+      if (!isNativeRuntime()) {
         return memoryStore.get(key) ?? null;
       }
       return await AsyncStorage.getItem(key);
@@ -75,7 +104,7 @@ const safeStorage = {
   async setItem(key: string, value: string): Promise<void> {
     try {
       memoryStore.set(key, value);
-      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+      if (!isNativeRuntime()) {
         return;
       }
       await AsyncStorage.setItem(key, value);
@@ -84,7 +113,7 @@ const safeStorage = {
   async removeItem(key: string): Promise<void> {
     try {
       memoryStore.delete(key);
-      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+      if (!isNativeRuntime()) {
         return;
       }
       await AsyncStorage.removeItem(key);
@@ -236,6 +265,12 @@ export async function pruneExpiredArticles(retentionDays: number) {
 }
 
 export async function clearNewsCache() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  feedsDirty = false;
+  detailsDirty = false;
   cache.clear();
   details.clear();
   persistenceLoaded = true;
@@ -262,6 +297,13 @@ export async function getNews(id: CategoryId, controller?: AbortController, refr
   if (!category) throw new Error('Unknown category');
   await ensurePersistenceLoaded();
   const previous = cache.get(id);
+
+  // Immediate offline fallback if device is not connected to internet
+  const online = await isOnline().catch(() => true);
+  if (!online && previous) {
+    return { ...previous, stale: true };
+  }
+
   if (!refresh && previous && !previous.stale && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return previous;
   try {
     const fetched = await readRSS(`https://hihi2.com/category/${category.path}/feed`, controller);
@@ -283,6 +325,11 @@ export async function getArticle(id: string, controller?: AbortController): Prom
   for (const feed of cache.values()) {
     const article = feed.articles.find(item => getArticleId(item.url) === id);
     if (article) return article;
+  }
+
+  const online = await isOnline().catch(() => true);
+  if (!online) {
+    return null;
   }
   try {
     const articles = await readRSS(`https://hihi2.com/?feed=rss2&p=${id}&withoutcomments=1`, controller);

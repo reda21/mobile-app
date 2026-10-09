@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { useAppStore, palettes, type AppState } from './store';
+import { useAppStore, palettes, registerAppVisit, type AppState } from './store';
 
 export { useAppStore, palettes };
 
@@ -11,6 +11,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const init = useAppStore(s => s.init);
   useEffect(() => {
     init();
+    void registerAppVisit();
   }, [init]);
   return <>{children}</>;
 }

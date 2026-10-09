@@ -18,6 +18,7 @@ export function useNewsWatcher(opts: {
   const ready = useAppStore((s) => s.ready);
   const notifyEnabled = useAppStore((s) => s.notifyNewNews);
   const autoCheck = useAppStore((s) => s.autoCheckNewNews);
+  const alertCategories = useAppStore((s) => s.alertCategories);
   const [fresh, setFresh] = useState<Article[]>([]);
   const [checking, setChecking] = useState(false);
   const [lastCheckAt, setLastCheckAt] = useState<string | null>(null);
@@ -41,16 +42,16 @@ export function useNewsWatcher(opts: {
         // 1) Toast in-app (react-call, singleton)
         showNewNewsToast(res.count, latest.title, () => onNewRef.current?.(res.fresh)).catch(() => {});
         // 2) Notification système (si activée + permission + anti-spam)
-        if (notifyEnabled && (await shouldNotifyNow())) {
+        if (notifyEnabled && alertCategories.includes(category) && (await shouldNotifyNow())) {
           const perm = await getNotificationPermission();
           if (perm === 'granted') {
-            await sendNewNewsNotification({
+            const sent = await sendNewNewsNotification({
               count: res.count,
               latestTitle: latest.title,
               articleId: latest.url.match(/\/p(\d+)\.html$/)?.[1] ?? latest.url.match(/[?&]p=(\d+)/)?.[1] ?? null,
               category,
             });
-            await stampNotified();
+            if (sent) await stampNotified();
           }
         }
         onNewRef.current?.(res.fresh);
@@ -64,7 +65,37 @@ export function useNewsWatcher(opts: {
       checkingRef.current = false;
       setChecking(false);
     }
-  }, [category, ready, notifyEnabled]);
+  }, [category, ready, notifyEnabled, alertCategories]);
+
+  useEffect(() => {
+    if (!ready || !enabled || !autoCheck || !notifyEnabled) return;
+    let controller = new AbortController();
+    let cancelled = false;
+    let running = false;
+    async function checkSubscriptions() {
+      if (cancelled || running || AppState.currentState !== 'active') return;
+      controller = new AbortController();
+      running = true;
+      try {
+        for (const id of alertCategories.filter(id => id !== category)) {
+          if (controller.signal.aborted) break;
+          try {
+            const res = await checkForNewNews(id, controller);
+            const latest = res.fresh[0];
+            if (!controller.signal.aborted && latest && await getNotificationPermission() === 'granted' && await shouldNotifyNow()) {
+              const sent = await sendNewNewsNotification({ count: res.count, latestTitle: latest.title, category: id, articleId: latest.url.match(/p(\d+)/)?.[1] ?? null });
+              if (sent) await stampNotified();
+            }
+          } catch {
+            // One unavailable category does not stop the other subscriptions.
+          }
+        }
+      } finally { running = false; }
+    }
+    const initial = setTimeout(() => void checkSubscriptions(), 25_000);
+    const interval = setInterval(() => void checkSubscriptions(), POLL_MS);
+    return () => { cancelled = true; controller.abort(); clearTimeout(initial); clearInterval(interval); };
+  }, [ready, enabled, autoCheck, notifyEnabled, alertCategories, category]);
 
   useEffect(() => {
     if (!ready || !enabled || !autoCheck) return;

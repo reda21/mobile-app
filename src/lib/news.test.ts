@@ -1,6 +1,6 @@
 import { test, assert, vi, expect } from 'vitest';
-import { parseFeed, readHtml, getNews, getArticle, isArticle, clearNewsCache, getCacheStats, pruneExpiredArticles, type Article } from './news.ts';
-import { categories } from './categories.ts';
+import { parseFeed, readHtml, getNews, getArticle, isArticle, clearNewsCache, flushCachePersist, getCacheStats, pruneExpiredArticles, type Article } from './news.ts';
+import { categories, type CategoryId } from './categories.ts';
 import { getArticleId, getArticleHref } from './article-link.ts';
 
 test('native reader preserves Arabic paragraphs and ignores HTML scripts, style and unsafe images', () => {
@@ -8,7 +8,6 @@ test('native reader preserves Arabic paragraphs and ignores HTML scripts, style 
   assert.deepEqual(body.paragraphs, ['أخبار & كرة', 'التفاصيل …']);
   assert.equal(body.image, 'https://sc1.hihi2.com/photo.jpg');
 });
-
 test('native reader decodes diverse HTML entities and ignores external untrusted images', () => {
   const html = '<div>&quot;ريال مدريد&quot; &lt;يفوز&gt; &#x20AC;100m</div><img src="https://malicious.com/tracker.png" /><img src="https://sc2.hihi2.com/pic.png" />';
   const res = readHtml(html);
@@ -32,6 +31,7 @@ test('RSS parsing handles duplicate items and falls back to description when con
   const xml = `<rss><channel>
     <item><title>خبر أول</title><link>https://hihi2.com/p111.html</link><description>وصف الخبر 1</description></item>
     <item><title>خبر مكرر</title><link>https://hihi2.com/p111.html</link><description>وصف مكرر</description></item>
+    <item><title>بدون رابط</title><description>يجب تجاهله</description></item>
     <item><title>خبر ثان</title><link>https://hihi2.com/p222.html</link><description>وصف الخبر 2</description><category>أوروبا</category></item>
   </channel></rss>`;
   const items = parseFeed(xml);
@@ -75,7 +75,7 @@ test('25 categories include the 14 requested clubs and article links accept only
 });
 
 test('direct mobile deep links load a single-post RSS without a previous news screen', async () => {
-  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any) => {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: string | URL | Request) => {
     assert.equal(url, 'https://hihi2.com/?feed=rss2&p=556677&withoutcomments=1');
     return new Response('<rss><channel><item><title>خبر مباشر</title><link>https://hihi2.com/p556677.html</link><description>تفاصيل الخبر</description></item></channel></rss>');
   });
@@ -84,7 +84,7 @@ test('direct mobile deep links load a single-post RSS without a previous news sc
 });
 
 test('getNews throws on unknown category', async () => {
-  await expect(getNews('unknown-cat' as any)).rejects.toThrow(/Unknown category/);
+  await expect(getNews('unknown-cat' as unknown as CategoryId)).rejects.toThrow(/Unknown category/);
 });
 
 test('getNews falls back to cached feed with stale: true on network error', async () => {
@@ -121,4 +121,43 @@ test('clearNewsCache empties cache and getCacheStats reports zeroes', async () =
 test('pruneExpiredArticles executes without errors', async () => {
   await pruneExpiredArticles(1);
   await pruneExpiredArticles(7);
+});
+
+test('pruneExpiredArticles removes feeds older than the retention window', async () => {
+  await clearNewsCache();
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('<rss><channel><item><title>خبر قديم</title><link>https://hihi2.com/p9090.html</link><description>موجز</description></item></channel></rss>'));
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-10-09T12:00:00.000Z'));
+    await getNews('asia', undefined, true);
+    await flushCachePersist();
+    vi.setSystemTime(new Date('2026-10-17T12:00:00.000Z'));
+    await pruneExpiredArticles(7);
+    assert.equal((await getCacheStats()).feedCount, 0);
+  } finally {
+    vi.useRealTimers();
+    fetchSpy.mockRestore();
+    await clearNewsCache();
+  }
+});
+
+test('getNews serves instant cache with stale: true when offline without calling fetch', async () => {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    return new Response('<rss><channel><item><title>خبر أوفلاين</title><link>https://hihi2.com/p7777.html</link><description>موجز</description></item></channel></rss>');
+  });
+  await getNews('arab', undefined, true);
+  fetchSpy.mockClear();
+
+  const { setOnlineChecker } = await import('./news.ts');
+  setOnlineChecker(async () => false);
+  try {
+    const feed = await getNews('arab', undefined, true);
+    assert.equal(feed.articles.length, 1);
+    assert.equal(feed.articles[0].id, 'https://hihi2.com/p7777.html');
+    assert.equal(feed.stale, true);
+    assert.equal(fetchSpy.mock.calls.length, 0);
+  } finally {
+    setOnlineChecker(async () => true);
+    fetchSpy.mockRestore();
+  }
 });

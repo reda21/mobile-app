@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { categories, type CategoryId } from './categories';
+import { isNativeRuntime } from './runtime';
+import { setAnalyticsConsent, track } from './analytics';
 import { isArticle, isSavedArticle, toSavedArticle, MAX_SAVED, type Article, type SavedArticle, clearNewsCache, pruneExpiredArticles, getCacheStats } from './news';
 
 export const palettes = {
@@ -21,6 +23,13 @@ export interface AppState {
   cacheStats: { feedCount: number; articleCount: number };
   notifyNewNews: boolean;
   autoCheckNewNews: boolean;
+  dailyReminder: boolean;
+  alertCategories: CategoryId[];
+  analyticsEnabled: boolean;
+  appVisits: number;
+  setDailyReminder: (enabled: boolean) => void;
+  toggleAlertCategory: (category: CategoryId) => void;
+  setAnalyticsEnabled: (enabled: boolean) => void;
 
   // Actions
   init: () => Promise<void>;
@@ -40,10 +49,10 @@ export interface AppState {
 }
 
 const memoryStore = new Map<string, string>();
-const safeStorage = {
+export const safeStorage = {
   async getItem(key: string): Promise<string | null> {
     try {
-      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+      if (!isNativeRuntime()) {
         return memoryStore.get(key) ?? null;
       }
       return await AsyncStorage.getItem(key);
@@ -54,10 +63,19 @@ const safeStorage = {
   async setItem(key: string, value: string): Promise<void> {
     try {
       memoryStore.set(key, value);
-      if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+      if (!isNativeRuntime()) {
         return;
       }
       await AsyncStorage.setItem(key, value);
+    } catch {}
+  },
+  async removeItem(key: string): Promise<void> {
+    try {
+      memoryStore.delete(key);
+      if (!isNativeRuntime()) {
+        return;
+      }
+      await AsyncStorage.removeItem(key);
     } catch {}
   }
 };
@@ -75,6 +93,9 @@ function schedulePersist(state: AppState) {
       cacheRetentionDays: state.cacheRetentionDays,
       notifyNewNews: state.notifyNewNews,
       autoCheckNewNews: state.autoCheckNewNews,
+      dailyReminder: state.dailyReminder,
+      alertCategories: state.alertCategories,
+      analyticsEnabled: state.analyticsEnabled,
     });
     safeStorage.setItem(STORAGE_KEY, payload);
   }, 100);
@@ -101,8 +122,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   ready: false,
   notice: '',
   cacheStats: { feedCount: 0, articleCount: 0 },
-  notifyNewNews: true,
+  notifyNewNews: false,
   autoCheckNewNews: true,
+  dailyReminder: false,
+  alertCategories: ['transfers', 'europe'],
+  analyticsEnabled: false,
+  appVisits: 0,
 
   init: async () => {
     try {
@@ -116,9 +141,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           saved: migrateSaved(data.saved),
           fontSizeDelta: typeof data.fontSizeDelta === 'number' ? Math.max(-2, Math.min(8, data.fontSizeDelta)) : 0,
           cacheRetentionDays: retention,
-          notifyNewNews: data.notifyNewNews !== false,
+          notifyNewNews: data.notifyNewNews === true,
           autoCheckNewNews: data.autoCheckNewNews !== false,
+          dailyReminder: data.dailyReminder === true,
+          alertCategories: Array.isArray(data.alertCategories) ? categories.filter(c => data.alertCategories.includes(c.id)).map(c => c.id) : ['transfers', 'europe'],
+          analyticsEnabled: data.analyticsEnabled === true,
         });
+        setAnalyticsConsent(data.analyticsEnabled === true);
         pruneExpiredArticles(retention).catch(() => {});
       }
     } catch {
@@ -152,6 +181,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? state.saved.filter(a => a.url !== article.url)
         : [toSavedArticle(article), ...state.saved].slice(0, MAX_SAVED);
       const next = { ...state, saved: nextSaved };
+      if (!exists) void track('article_save', { article_id: article.url.match(/p(\d+)/)?.[1] ?? '' });
       schedulePersist(next);
       get().setNotice(exists ? 'تمت إزالة الخبر من المحفوظات' : 'تم حفظ الخبر في قائمتك');
       return { saved: nextSaved };
@@ -244,4 +274,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { autoCheckNewNews: v };
     });
   },
+  setDailyReminder: (dailyReminder) => {
+    set({ dailyReminder });
+    schedulePersist(get());
+  },
+  toggleAlertCategory: (category) => {
+    const current = get().alertCategories;
+    set({ alertCategories: current.includes(category) ? current.filter(id => id !== category) : [...current, category] });
+    schedulePersist(get());
+  },
+  setAnalyticsEnabled: (analyticsEnabled) => {
+    setAnalyticsConsent(analyticsEnabled);
+    set({ analyticsEnabled });
+    schedulePersist(get());
+  },
 }));
+
+let visitPromise: Promise<void> | undefined;
+/** Count once per JS launch, including React Strict Mode's repeated mount. */
+export function registerAppVisit(): Promise<void> {
+  return visitPromise ??= (async () => {
+    const previous = Number(await safeStorage.getItem('akhbar-visits-v1'));
+    const appVisits = (Number.isFinite(previous) ? Math.max(0, previous) : 0) + 1;
+    await safeStorage.setItem('akhbar-visits-v1', String(appVisits));
+    useAppStore.setState({ appVisits });
+  })();
+}

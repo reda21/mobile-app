@@ -1,5 +1,5 @@
 import { test, assert, vi } from 'vitest';
-import { useAppStore, palettes } from './store.ts';
+import { safeStorage, useAppStore, palettes, registerAppVisit } from './store.ts';
 import { MAX_SAVED, isSavedArticle, toSavedArticle } from './news.ts';
 import type { Article } from './news.ts';
 
@@ -12,6 +12,22 @@ const mockArticle = (id: string): Article => ({
   image: 'https://sc1.hihi2.com/photo.jpg',
   paragraphs: [`فقرة أولى ${id}`, `فقرة ثانية ${id}`],
   tags: ['رياضة', 'كرة القدم'],
+});
+
+test('one launch counts one visit even when mounted twice', async () => {
+  await safeStorage.setItem('akhbar-visits-v1', '1');
+  await Promise.all([registerAppVisit(), registerAppVisit()]);
+  assert.equal(useAppStore.getState().appVisits, 2);
+  assert.equal(await safeStorage.getItem('akhbar-visits-v1'), '2');
+});
+
+test('alert subscriptions toggle independently of the current category', () => {
+  const store = useAppStore.getState();
+  const before = store.alertCategories;
+  store.toggleAlertCategory('africa');
+  assert.equal(useAppStore.getState().alertCategories.includes('africa'), !before.includes('africa'));
+  store.toggleAlertCategory('africa');
+  assert.deepEqual(useAppStore.getState().alertCategories, before);
 });
 
 test('store initializes with correct default values and theme palettes', () => {
@@ -103,6 +119,14 @@ test('toSavedArticle migre les anciens favoris complets', () => {
   assert.ok(isSavedArticle(light));
   assert.ok(!('paragraphs' in light));
   assert.equal(MAX_SAVED, 50);
+});
+
+test('safeStorage falls back to the in-memory store in the test runtime', async () => {
+  const key = 'test-memory-fallback';
+  await safeStorage.setItem(key, 'ok');
+  assert.equal(await safeStorage.getItem(key), 'ok');
+  await safeStorage.removeItem(key);
+  assert.equal(await safeStorage.getItem(key), null);
 });
 
 test('store handles font size scaling with upper and lower bounds', () => {

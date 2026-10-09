@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getNews, type Article } from './news';
+import { isNativeRuntime } from './runtime';
 import type { CategoryId } from './categories';
 
 const LAST_SEEN_KEY = 'akhbar-last-seen-v1';
@@ -11,7 +12,7 @@ const memory = new Map<string, string>();
 
 async function safeGet(key: string): Promise<string | null> {
   try {
-    if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) {
+    if (!isNativeRuntime()) {
       return memory.get(key) ?? null;
     }
     return await AsyncStorage.getItem(key);
@@ -23,7 +24,7 @@ async function safeGet(key: string): Promise<string | null> {
 async function safeSet(key: string, value: string): Promise<void> {
   try {
     memory.set(key, value);
-    if (typeof window === 'undefined' && typeof navigator === 'undefined' && !(globalThis as any).nativeEventEmitter) return;
+    if (!isNativeRuntime()) return;
     await AsyncStorage.setItem(key, value);
   } catch {
     // ignore

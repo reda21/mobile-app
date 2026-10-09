@@ -1,11 +1,14 @@
 import { memo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, type TextProps, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, type TextProps, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Link, router } from 'expo-router';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { APP_NAME } from '../lib/categories';
 import { getArticleId } from '../lib/article-link';
+import { formatCount, formatDateAr } from '../lib/format';
+import { t } from '../lib/i18n';
+import { reportProblem } from '../lib/feedback';
 import { usePreferences } from '../lib/preferences';
 import type { Article, SavedArticle } from '../lib/news';
 
@@ -39,16 +42,16 @@ export const Ball = memo(function Ball({ size = 42 }: { size?: number }) {
 });
 export const ArabicText = memo(function ArabicText({ style, ...props }: TextProps) {
   const { colors } = usePreferences();
-  return <Text {...props} style={[ui.text, { color: colors.ink }, style]}/>;
+  return <Text {...props} allowFontScaling={props.allowFontScaling ?? true} maxFontSizeMultiplier={props.maxFontSizeMultiplier ?? 1.3} style={[ui.text, { color: colors.ink }, style]}/>;
 });
 export function Frame({ children, bottom }: { children: ReactNode; bottom?: 'news' | 'categories' | 'saved' | 'settings' }) {
   const { colors, notice } = usePreferences();
-  return <View style={[{ flex: 1, backgroundColor: colors.paper }, Platform.OS !== 'web' && { direction: 'ltr' }]}><SafeAreaView edges={['top', 'left', 'right']} style={[ui.frame, { backgroundColor: colors.paper }]}>{children}{bottom && <BottomNav active={bottom}/>}{!!notice && <View style={[ui.notice, { backgroundColor: colors.ink }]} accessibilityLiveRegion="polite"><ArabicText style={{ color: colors.paper, fontSize: 12 }}>{notice}</ArabicText></View>}</SafeAreaView></View>;
+  return <View style={[{ flex: 1, backgroundColor: colors.paper, direction: 'rtl' }]}><SafeAreaView edges={['top', 'left', 'right']} style={[ui.frame, { backgroundColor: colors.paper }]}>{children}{bottom && <BottomNav active={bottom}/>}{!!notice && <View style={[ui.notice, { backgroundColor: colors.ink }]} accessibilityLiveRegion="polite"><ArabicText style={{ color: colors.paper, fontSize: 12 }}>{notice}</ArabicText></View>}</SafeAreaView></View>;
 }
 export const Header = memo(function Header({ back = false }: { back?: boolean }) {
   const { colors, dark, toggleTheme } = usePreferences();
   return <View style={[ui.header, ui.row, { borderBottomColor: colors.line }]}>
-    <View style={[ui.row, { flex: 1, gap: 10 }]}><Ball/><View><ArabicText style={{ fontFamily: fonts.heading, fontSize: 14 }}>{APP_NAME}</ArabicText><ArabicText style={{ fontSize: 10, color: colors.muted }}>العالم يتكلم كرة</ArabicText></View></View>
+    <View style={[ui.row, { flex: 1, gap: 10 }]}><Ball/><View><ArabicText style={{ fontFamily: fonts.heading, fontSize: 14 }}>{APP_NAME}</ArabicText><ArabicText style={{ fontSize: 10, color: colors.muted }}>{t('appTagline')}</ArabicText></View></View>
     {back && <Pressable accessibilityRole="button" accessibilityLabel="العودة" hitSlop={8} style={ui.iconButton} onPress={() => router.canGoBack() ? router.back() : router.replace('/')}><Icon name="arrow"/></Pressable>}
     <Pressable accessibilityRole="button" accessibilityLabel="الإعدادات" hitSlop={8} style={ui.iconButton} onPress={() => router.push('/settings')}><Icon name="settings"/></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={dark ? 'تفعيل الوضع النهاري' : 'تفعيل الوضع الليلي'} hitSlop={8} style={ui.iconButton} onPress={toggleTheme}><Icon name={dark ? 'sun' : 'moon'}/></Pressable>
@@ -62,35 +65,26 @@ function BottomNav({ active }: { active: 'news' | 'categories' | 'saved' | 'sett
     { id: 'saved', label: 'المحفوظات', icon: 'bookmark', href: '/saved' },
     { id: 'settings', label: 'الإعدادات', icon: 'settings', href: '/settings' },
   ] as const;
-  return <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.surface }}><View style={[ui.bottom, ui.row, { borderTopColor: colors.line }]}>{tabs.map(tab => <Pressable key={tab.id} accessibilityRole="button" accessibilityLabel={tab.label} accessibilityState={{ selected: active === tab.id }} onPress={() => router.replace(tab.href)} style={ui.tab}><View style={[ui.tabIcon, active === tab.id && { backgroundColor: colors.soft }]}><Icon name={tab.icon} color={active === tab.id ? colors.green : colors.muted}/></View><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: active === tab.id ? colors.green : colors.muted }}>{tab.label}{tab.id === 'saved' && saved.length ? ` (${saved.length.toLocaleString('ar')})` : ''}</ArabicText></Pressable>)}</View></SafeAreaView>;
+  return <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.surface }}><View style={[ui.bottom, ui.row, { borderTopColor: colors.line }]}>{tabs.map(tab => <Pressable key={tab.id} accessibilityRole="button" accessibilityLabel={tab.label} accessibilityHint="اضغط للانتقال إلى هذا القسم" accessibilityState={{ selected: active === tab.id }} onPress={() => router.replace(tab.href)} style={ui.tab}><View style={[ui.tabIcon, active === tab.id && { backgroundColor: colors.soft }]}><Icon name={tab.icon} color={active === tab.id ? colors.green : colors.muted}/></View><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: active === tab.id ? colors.green : colors.muted }}>{tab.label}{tab.id === 'saved' && saved.length ? ` (${formatCount(saved.length)})` : ''}</ArabicText></Pressable>)}</View></SafeAreaView>;
 }
-export const Photo = memo(function Photo({ article, style }: { article: CardArticle; style?: ViewStyle }) {
+const BLURHASH = 'LEHV6nWB2yk8pyo0adR*.7kCMdnj';
+export const Photo = memo(function Photo({ article, style, hero = false }: { article: CardArticle; style?: ViewStyle; hero?: boolean }) {
   const { colors } = usePreferences();
   const [failed, setFailed] = useState(false);
-  return <View style={[ui.photo, { backgroundColor: colors.soft }, style]}>{article.image && !failed ? <Image source={{ uri: article.image }} contentFit="cover" transition={120} cachePolicy="memory-disk" style={StyleSheet.absoluteFill} onError={() => setFailed(true)} accessibilityLabel="صورة الخبر"/> : <View style={ui.placeholder}><Ball size={46}/></View>}</View>;
+  return <View style={[ui.photo, { backgroundColor: colors.soft }, style]}>{article.image && !failed ? <Image source={{ uri: article.image }} placeholder={BLURHASH} placeholderContentFit="cover" priority={hero ? 'high' : 'low'} recyclingKey={article.id} allowDownscaling contentFit="cover" transition={120} cachePolicy="memory-disk" style={StyleSheet.absoluteFill} onError={() => setFailed(true)} accessibilityLabel={`صورة: ${article.title}`}/> : <View style={ui.placeholder}><Ball size={46}/></View>}</View>;
 });
 export const Bookmark = memo(function Bookmark({ article }: { article: CardArticle }) {
   const { saved, toggleSaved, colors } = usePreferences();
   const selected = saved.some(a => a.url === article.url);
   return <Pressable accessibilityRole="button" accessibilityLabel={selected ? 'إزالة من المحفوظات' : 'حفظ الخبر'} accessibilityState={{ selected }} onPress={() => toggleSaved(article)} hitSlop={8} style={[ui.iconButton, { backgroundColor: colors.surface }]}><Icon name="bookmark" size={18} color={colors.green} filled={selected}/></Pressable>;
 });
-let cachedDateFormatter: Intl.DateTimeFormat | null = null;
-function formatArticleDate(published: string | null): string {
-  if (!published) return 'هاي كورة';
-  try {
-    cachedDateFormatter ??= new Intl.DateTimeFormat('ar', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-    return cachedDateFormatter.format(new Date(published));
-  } catch {
-    return 'هاي كورة';
-  }
-}
 export const ArticleCard = memo(function ArticleCard({ article, hero = false }: { article: CardArticle; hero?: boolean }) {
   const { colors } = usePreferences();
   const target = { pathname: '/article/[id]', params: { id: getArticleId(article.url) ?? 'unknown' } } as const;
-  const date = formatArticleDate(article.published);
-  const meta = <View style={[ui.row, { gap: 7 }]}><ArabicText numberOfLines={1} style={{ color: colors.green, fontSize: 10, fontFamily: fonts.medium, flexShrink: 1 }}>{article.tags[0] || 'كرة القدم'}</ArabicText><ArabicText style={{ color: colors.muted, fontSize: 10 }}>• {date}</ArabicText></View>;
-  return hero ? <View style={{ paddingBottom: 23 }}><View><Link href={target} asChild><Pressable accessibilityLabel={`قراءة: ${article.title}`} accessibilityRole="button"><Photo article={article} style={{ aspectRatio: 1.55 }}/></Pressable></Link><View style={{ position: 'absolute', top: 12, left: 12 }}><Bookmark article={article}/></View><View style={[ui.imageLabel, { backgroundColor: colors.surface }]}><ArabicText style={{ fontSize: 10, fontFamily: fonts.bold, color: colors.green }}>في الواجهة</ArabicText></View></View><View style={{ marginTop: 14 }}>{meta}</View><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={article.title}><ArabicText style={[ui.heroTitle, { fontFamily: fonts.heading }]}>{article.title}</ArabicText></Pressable></Link><ArabicText numberOfLines={2} style={{ color: colors.muted, fontSize: 12, lineHeight: 24 }}>{article.summary}</ArabicText><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel="اقرأ القصة كاملة" style={StyleSheet.flatten([ui.row, { alignSelf: 'flex-end', gap: 10, marginTop: 12 }])}><ArabicText style={{ color: colors.green, fontFamily: fonts.bold, fontSize: 12 }}>اقرأ القصة كاملة</ArabicText><Icon name="arrow" size={16} color={colors.green}/></Pressable></Link></View>
-    : <View style={[ui.compactCard, ui.row, { borderBottomColor: colors.line }]}><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={`قراءة: ${article.title}`}><Photo article={article} style={{ width: 94, height: 96, aspectRatio: undefined }}/></Pressable></Link><View style={{ flex: 1, gap: 7 }}>{meta}<Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={article.title}><ArabicText numberOfLines={3} style={{ fontFamily: fonts.bold, fontSize: 14, lineHeight: 26 }}>{article.title}</ArabicText></Pressable></Link><View style={[ui.row, { justifyContent: 'space-between' }]}><ArabicText style={{ fontSize: 9, color: colors.muted }}>هاي كورة</ArabicText><Bookmark article={article}/></View></View></View>;
+  const date = formatDateAr(article.published) || t('sourceName');
+  const meta = <View style={[ui.row, { gap: 7 }]}><ArabicText numberOfLines={1} style={{ color: colors.green, fontSize: 10, fontFamily: fonts.medium, flexShrink: 1 }}>{article.tags[0] || t('football')}</ArabicText><ArabicText style={{ color: colors.muted, fontSize: 10 }}>• {date}</ArabicText></View>;
+  return hero ? <View style={{ paddingBottom: 23 }}><View><Link href={target} asChild><Pressable accessibilityLabel={`قراءة: ${article.title}`} accessibilityHint="اضغط لفتح الخبر" accessibilityRole="button"><Photo article={article} hero style={{ aspectRatio: 1.55 }}/></Pressable></Link><View style={{ position: 'absolute', top: 12, left: 12 }}><Bookmark article={article}/></View><View style={[ui.imageLabel, { backgroundColor: colors.surface }]}><ArabicText style={{ fontSize: 10, fontFamily: fonts.bold, color: colors.green }}>في الواجهة</ArabicText></View></View><View style={{ marginTop: 14 }}>{meta}</View><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={article.title} accessibilityHint="اضغط لفتح الخبر"><ArabicText style={[ui.heroTitle, { fontFamily: fonts.heading }]}>{article.title}</ArabicText></Pressable></Link><ArabicText numberOfLines={2} style={{ color: colors.muted, fontSize: 12, lineHeight: 24 }}>{article.summary}</ArabicText><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel="اقرأ القصة كاملة" accessibilityHint="اضغط لقراءة النص الكامل" style={StyleSheet.flatten([ui.row, { alignSelf: 'flex-end', gap: 10, marginTop: 12 }])}><ArabicText style={{ color: colors.green, fontFamily: fonts.bold, fontSize: 12 }}>اقرأ القصة كاملة</ArabicText><Icon name="arrow" size={16} color={colors.green}/></Pressable></Link></View>
+    : <View style={[ui.compactCard, ui.row, { borderBottomColor: colors.line }]}><Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={`قراءة: ${article.title}`} accessibilityHint="اضغط لفتح الخبر"><Photo article={article} style={{ width: 94, height: 96, aspectRatio: undefined }}/></Pressable></Link><View style={{ flex: 1, gap: 7 }}>{meta}<Link href={target} asChild><Pressable accessibilityRole="button" accessibilityLabel={article.title} accessibilityHint="اضغط لفتح الخبر"><ArabicText numberOfLines={3} style={{ fontFamily: fonts.bold, fontSize: 14, lineHeight: 26 }}>{article.title}</ArabicText></Pressable></Link><View style={[ui.row, { justifyContent: 'space-between' }]}><ArabicText style={{ fontSize: 9, color: colors.muted }}>{t('sourceName')}</ArabicText><Bookmark article={article}/></View></View></View>;
 });
 export const NewsRow = memo(function NewsRow({ article, hero, showMoreHeading }: { article: CardArticle; hero: boolean; showMoreHeading: boolean }) {
   const { colors } = usePreferences();
@@ -101,9 +95,9 @@ export const NewsRow = memo(function NewsRow({ article, hero, showMoreHeading }:
     </View>
   );
 });
-export const EmptyState = memo(function EmptyState({ title, message, retry, loading = false }: { title: string; message?: string; retry?: () => void; loading?: boolean }) {
+export const EmptyState = memo(function EmptyState({ title, message, retry, loading = false }: { title: string; message?: string | undefined; retry?: (() => void) | undefined; loading?: boolean }) {
   const { colors } = usePreferences();
-  return <View style={ui.empty}>{loading ? <ActivityIndicator color={colors.green} size="large"/> : <Ball size={45}/>}<ArabicText style={{ fontFamily: fonts.bold, fontSize: 18, textAlign: 'center' }}>{title}</ArabicText>{message && <ArabicText style={{ color: colors.muted, fontSize: 12, textAlign: 'center', lineHeight: 24 }}>{message}</ArabicText>}{retry && <Pressable accessibilityRole="button" style={[ui.primaryButton, { backgroundColor: colors.green }]} onPress={retry}><ArabicText style={{ color: colors.paper, fontFamily: fonts.bold }}>حاول مرة أخرى</ArabicText></Pressable>}</View>;
+  return <View style={ui.empty}>{loading ? <ActivityIndicator color={colors.green} size="large"/> : <Ball size={45}/>}<ArabicText style={{ fontFamily: fonts.bold, fontSize: 18, textAlign: 'center' }}>{title}</ArabicText>{message && <ArabicText style={{ color: colors.muted, fontSize: 12, textAlign: 'center', lineHeight: 24 }}>{message}</ArabicText>}{retry && <Pressable accessibilityRole="button" style={[ui.primaryButton, { backgroundColor: colors.green }]} onPress={retry}><ArabicText style={{ color: colors.paper, fontFamily: fonts.bold }}>حاول مرة أخرى</ArabicText></Pressable>}{retry && !loading && <Pressable accessibilityRole="button" onPress={() => { void reportProblem().catch(() => {}); }}><ArabicText style={{ color: colors.green }}>الإبلاغ عن مشكلة</ArabicText></Pressable>}</View>;
 });
 export const ui = StyleSheet.create({
   frame: { flex: 1, width: '100%', maxWidth: 600, alignSelf: 'center' },
