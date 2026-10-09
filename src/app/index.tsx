@@ -1,34 +1,75 @@
-import { useEffect, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, StyleSheet, TextInput, View } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { categories, type CategoryId } from '../lib/categories';
-import { getNews, type NewsFeed } from '../lib/news';
+import { getNews, type Article, type NewsFeed } from '../lib/news';
+import { filterArticles } from '../lib/search';
+import { markCategorySeen } from '../lib/news-watcher';
+import { useDebouncedValue } from '../hooks/use-debounced-value';
+import { useNewsWatcher } from '../hooks/use-news-watcher';
 import { usePreferences } from '../lib/preferences';
-import { ArabicText, ArticleCard, EmptyState, Frame, Header, Icon, fonts, ui } from '../components/news-ui';
+import { ArabicText, EmptyState, Frame, Header, Icon, NewsRow, fonts, ui } from '../components/news-ui';
 
 export default function NewsScreen() {
   const { category, selectCategory, colors, ready } = usePreferences();
   const [result, setResult] = useState<{ key: string; feed?: NewsFeed; error?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [reload, setReload] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const key = `${category}:${reload}`;
   const feed = result?.feed;
   const loading = !ready || result?.key !== key;
   const error = result?.key === key ? result.error ?? '' : '';
   useEffect(() => {
     if (!ready) return;
+    const key = `${category}:${reload}`;
     const controller = new AbortController();
     getNews(category, controller, reload > 0).then(feed => { if (!controller.signal.aborted) setResult({ key, feed }); }).catch(() => { if (!controller.signal.aborted) setResult({ key, error: 'تعذر تحميل الأخبار. تحقق من اتصالك وحاول مرة أخرى.' }); });
     return () => controller.abort();
-  }, [category, reload, ready, key]);
-  const normalize = (text: string) => text.replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').toLowerCase();
-  const articles = feed?.category === category ? feed.articles.filter(a => normalize(`${a.title} ${a.summary}`).includes(normalize(query.trim()))) : [];
+  }, [category, reload, ready]);
+  const trimmedQuery = query.trim();
+  const debouncedQuery = useDebouncedValue(trimmedQuery, 250);
+  const isSearching = trimmedQuery !== debouncedQuery;
+  const articles = useMemo(
+    () => (feed?.category === category ? filterArticles(feed.articles, debouncedQuery) : []),
+    [feed, category, debouncedQuery],
+  );
+  const listData = !loading && !error ? articles : [];
   const section = categories.find(c => c.id === category)!;
   const tabs: CategoryId[] = ['latest', 'europe', 'arab', 'transfers'];
+  const watcher = useNewsWatcher({
+    category,
+    onNew: () => setReload((r) => r + 1),
+  });
+  useEffect(() => {
+    if (feed?.articles.length) {
+      markCategorySeen(category, feed.articles[0]!.id).catch(() => {});
+      if (watcher.freshCount > 0) watcher.clearFresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed?.articles[0]?.id]);
+  const renderItem = useCallback(({ item, index }: { item: Article; index: number }) => (
+    <NewsRow article={item} hero={index === 0} showMoreHeading={index === 1} />
+  ), []);
+  const keyExtractor = useCallback((item: Article) => item.id, []);
+  const getItemType = useCallback((_: Article, index: number) => (index === 0 ? 'hero' : 'row'), []);
+  const handleRefresh = useCallback(() => setReload(r => r + 1), []);
   return <Frame bottom="news"><View style={[styles.topline, ui.row]}><ArabicText style={styles.live}>●  تغطية مستمرة</ArabicText><ArabicText style={styles.live}>شغف واحد. عالم كامل.</ArabicText></View><Header/>
-    <View style={[styles.tabs, ui.row, { borderBottomColor: colors.line }]}>{tabs.map(id => <Pressable key={id} accessibilityRole="button" accessibilityLabel={categories.find(c => c.id === id)!.name} accessibilityState={{ selected: category === id }} onPress={() => { setQuery(''); selectCategory(id); }} style={[styles.tab, { borderBottomColor: category === id ? colors.green : 'transparent' }]}><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: category === id ? colors.green : colors.muted }}>{categories.find(c => c.id === id)!.name}</ArabicText></Pressable>)}</View>
-    <FlatList data={!loading && !error ? articles : []} keyExtractor={item => item.id} initialNumToRender={6} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={loading && !!feed} onRefresh={() => setReload(r => r + 1)} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : `${articles.length.toLocaleString('ar')} خبر • المصدر: هاي كورة`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" onPress={() => setReload(r => r + 1)} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}</View>}
-      renderItem={({ item, index }) => <View>{index === 1 && <ArabicText accessibilityRole="header" style={[styles.moreHeading, { borderBottomColor: colors.line }]}>المزيد من الأخبار</ArabicText>}<ArticleCard article={item} hero={index === 0}/></View>}
-      ListEmptyComponent={<EmptyState loading={loading} title={loading ? 'أحدث الأخبار في الطريق' : error ? 'الأخبار ستعود قريبًا' : query ? 'لم نجد خبرًا بهذا العنوان' : 'لا توجد أخبار الآن'} message={error || (query ? 'جرّب كلمة أخرى للبحث.' : undefined)} retry={error ? () => setReload(r => r + 1) : undefined}/>}/>
+    <View style={[styles.tabs, ui.row, { borderBottomColor: colors.line }]}>{tabs.map(id => <Pressable key={id} accessibilityRole="button" accessibilityLabel={categories.find(c => c.id === id)!.name} accessibilityState={{ selected: category === id }} onPress={() => { setQuery(''); selectCategory(id); watcher.clearFresh(); }} style={[styles.tab, { borderBottomColor: category === id ? colors.green : 'transparent' }]}><ArabicText style={{ fontFamily: fonts.medium, fontSize: 10, color: category === id ? colors.green : colors.muted }}>{categories.find(c => c.id === id)!.name}</ArabicText></Pressable>)}</View>
+    {watcher.freshCount > 0 && (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${watcher.freshCount} أخبار جديدة، اضغط للتحديث`}
+        onPress={() => setReload((r) => r + 1)}
+        style={[styles.newBanner, { backgroundColor: colors.green }]}
+      >
+        <ArabicText style={styles.newBannerText}>
+          {watcher.freshCount === 1 ? 'خبر جديد وصل — اضغط للعرض 📰' : `${watcher.freshCount} أخبار جديدة — اضغط للعرض 📰`}
+        </ArabicText>
+      </Pressable>
+    )}
+    <FlashList data={listData} keyExtractor={keyExtractor} renderItem={renderItem} getItemType={getItemType} drawDistance={600} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={loading && !!feed} onRefresh={handleRefresh} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : isSearching ? 'جارٍ البحث…' : `${articles.length.toLocaleString('ar')} خبر • المصدر: هاي كورة`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" onPress={handleRefresh} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}</View>}
+      ListEmptyComponent={<EmptyState loading={loading} title={loading ? 'أحدث الأخبار في الطريق' : error ? 'الأخبار ستعود قريبًا' : query ? 'لم نجد خبرًا بهذا العنوان' : 'لا توجد أخبار الآن'} message={error || (query ? 'جرّب كلمة أخرى للبحث.' : undefined)} retry={error ? handleRefresh : undefined}/>}/>
   </Frame>;
 }
 const styles = StyleSheet.create({
@@ -40,5 +81,6 @@ const styles = StyleSheet.create({
   search: { marginTop: 20, borderWidth: 1, borderRadius: 5, paddingHorizontal: 13, gap: 10 },
   input: { flex: 1, height: 46, fontFamily: fonts.body, textAlign: 'right', writingDirection: 'rtl', fontSize: 12 },
   status: { borderTopWidth: 1, marginTop: 21, marginBottom: 12, paddingTop: 8, justifyContent: 'space-between' },
-  moreHeading: { fontFamily: fonts.heading, fontSize: 18, marginTop: 8, borderBottomWidth: 1, paddingBottom: 17 },
+  newBanner: { marginHorizontal: 20, marginTop: 12, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center' },
+  newBannerText: { color: '#fff', fontFamily: fonts.bold, fontSize: 12 },
 });

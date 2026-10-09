@@ -40,6 +40,13 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 100
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#176347",
+          "defaultChannel": "news"
+        }
       ]
     ],
     "experiments": {

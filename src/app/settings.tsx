@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { usePreferences } from '../lib/preferences';
+import { getNotificationPermission, requestNotificationPermission } from '../lib/local-notifications';
+import { checkForNewNews } from '../lib/news-watcher';
+import { showToast } from '../lib/toast';
 import { ArabicText, Frame, Header, Icon, fonts, ui } from '../components/news-ui';
 
 export default function SettingsScreen() {
@@ -9,14 +12,18 @@ export default function SettingsScreen() {
     fontSizeDelta, increaseFontSize, decreaseFontSize, resetFontSize,
     cacheRetentionDays, setCacheRetentionDays,
     clearCachedArticles, clearSaved,
-    cacheStats, refreshCacheStats, saved
+    cacheStats, refreshCacheStats, saved,
+    notifyNewNews, setNotifyNewNews, autoCheckNewNews, setAutoCheckNewNews, category,
   } = usePreferences();
 
   const [clearingCache, setClearingCache] = useState(false);
   const [clearingSaved, setClearingSaved] = useState(false);
+  const [perm, setPerm] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
+  const [checkingNews, setCheckingNews] = useState(false);
 
   useEffect(() => {
     refreshCacheStats();
+    getNotificationPermission().then(setPerm).catch(() => {});
   }, [refreshCacheStats]);
 
   const retentionOptions = [
@@ -172,6 +179,84 @@ export default function SettingsScreen() {
             <ArabicText style={{ fontSize: 10, color: colors.muted }}>
               {saved.length.toLocaleString('ar')} محفوظ
             </ArabicText>
+          </Pressable>
+        </View>
+
+        {/* Section notifications : react-call toast + notifs système + vérificateur */}
+        <View style={[styles.section, { backgroundColor: colors.surface, borderColor: colors.line }]}>
+          <View style={[ui.row, styles.sectionHeader]}>
+            <Icon name="clock" size={20} color={colors.green} />
+            <ArabicText style={[styles.sectionTitle, { color: colors.ink }]}>التنبيهات والأخبار الجديدة</ArabicText>
+          </View>
+
+          <View style={[ui.row, styles.settingRow]}>
+            <View style={{ flex: 1 }}>
+              <ArabicText style={{ fontFamily: fonts.medium, fontSize: 13 }}>فحص تلقائي كل 3 دقائق</ArabicText>
+              <ArabicText style={{ fontSize: 11, color: colors.muted }}>نظام يتحقق من الأخبار الجديدة في الخلفية</ArabicText>
+            </View>
+            <Switch
+              value={autoCheckNewNews}
+              onValueChange={setAutoCheckNewNews}
+              trackColor={{ false: colors.line, true: colors.green }}
+              thumbColor={colors.paper}
+            />
+          </View>
+
+          <View style={[ui.row, styles.settingRow, { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 14 }]}>
+            <View style={{ flex: 1 }}>
+              <ArabicText style={{ fontFamily: fonts.medium, fontSize: 13 }}>إشعار عند خبر جديد</ArabicText>
+              <ArabicText style={{ fontSize: 11, color: colors.muted }}>
+                {perm === 'granted' ? 'Toast داخل التطبيق + إشعار نظام' : perm === 'denied' ? 'الإذن مرفوض — فعّله من إعدادات الهاتف' : 'Toast + طلب إذن الإشعارات'}
+              </ArabicText>
+            </View>
+            <Switch
+              value={notifyNewNews}
+              onValueChange={async (v) => {
+                if (v) {
+                  const ok = await requestNotificationPermission().catch(() => false);
+                  setPerm(await getNotificationPermission().catch(() => 'undetermined' as const));
+                  if (!ok) {
+                    showToast({ title: 'تعذر تفعيل الإشعارات', message: 'اسمح بالإشعارات من إعدادات الهاتف.' }).catch(() => {});
+                    return;
+                  }
+                }
+                setNotifyNewNews(v);
+              }}
+              trackColor={{ false: colors.line, true: colors.green }}
+              thumbColor={colors.paper}
+            />
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="فحص الأخبار الجديدة الآن"
+            disabled={checkingNews}
+            onPress={async () => {
+              setCheckingNews(true);
+              try {
+                const res = await checkForNewNews(category);
+                if (res.isFirstRun) {
+                  showToast({ title: 'تم تفعيل المراقبة ✅', message: 'سننبهك عند وصول أخبار جديدة.' }).catch(() => {});
+                } else if (res.count > 0) {
+                  showToast({ title: `${res.count} أخبار جديدة 📰`, message: res.fresh[0]?.title ?? '', actionLabel: 'عرض' }).catch(() => {});
+                } else {
+                  showToast({ title: 'لا جديد حاليًا', message: 'أنت مطّلع على آخر الأخبار.' }).catch(() => {});
+                }
+              } catch {
+                showToast({ title: 'تعذر الفحص', message: 'تحقق من اتصالك وحاول مرة أخرى.' }).catch(() => {});
+              } finally {
+                setCheckingNews(false);
+              }
+            }}
+            style={[ui.row, styles.actionButton, { backgroundColor: colors.paper, borderColor: colors.line, marginTop: 12 }]}
+          >
+            <View style={[ui.row, { gap: 8 }]}>
+              <Icon name="refresh" size={17} color={colors.green} />
+              <ArabicText style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.ink }}>
+                {checkingNews ? 'جارٍ الفحص...' : 'فحص الأخبار الجديدة الآن'}
+              </ArabicText>
+            </View>
+            <ArabicText style={{ fontSize: 10, color: colors.muted }}>react-call + watcher</ArabicText>
           </Pressable>
         </View>
 

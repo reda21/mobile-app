@@ -17,9 +17,11 @@ export default function ArticleScreen() {
   const [retry, setRetry] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const key = `${id}:${retry}`;
-  const article = stored ?? (result?.key === key ? result.article : null);
-  const loading = !ready || (!stored && result?.key !== key);
-  const error = actionError || (result?.key === key ? result.error ?? '' : '');
+  const fetched = result?.key === key ? result.article : null;
+  // Favori léger affiché instantanément, corps complet rechargé via getArticle.
+  const article = fetched ?? stored ?? null;
+  const loading = !ready || (!article && result?.key !== key);
+  const error = actionError || (!stored && result?.key === key ? result.error ?? '' : '');
 
   useEffect(() => {
     return () => {
@@ -28,11 +30,14 @@ export default function ArticleScreen() {
   }, []);
 
   useEffect(() => {
-    if (!ready || stored) return;
+    if (!ready) return;
+    const key = `${id}:${retry}`;
     const controller = new AbortController();
     getArticle(id, controller).then(article => { if (!controller.signal.aborted) setResult({ key, article }); }).catch(() => { if (!controller.signal.aborted) setResult({ key, article: null, error: 'تعذر تحميل الخبر. تحقق من اتصالك وحاول مرة أخرى.' }); });
     return () => controller.abort();
-  }, [id, ready, stored, key]);
+  }, [id, ready, retry]);
+
+  const paragraphs = article ? ('paragraphs' in article && article.paragraphs.length ? article.paragraphs : [article.summary].filter(Boolean)) : [];
 
   async function share() {
     if (!article) return;
@@ -44,7 +49,7 @@ export default function ArticleScreen() {
       Speech.stop();
       setSpeaking(false);
     } else if (article) {
-      const textToSpeak = [article.title, ...(article.paragraphs.length ? article.paragraphs : [article.summary])].join('. ');
+      const textToSpeak = [article.title, ...paragraphs].join('. ');
       setSpeaking(true);
       Speech.speak(textToSpeak, {
         language: 'ar',
@@ -79,7 +84,7 @@ export default function ArticleScreen() {
     <ArabicText accessibilityRole="header" style={[styles.title, { fontSize: 23 + fontSizeDelta, lineHeight: 43 + fontSizeDelta * 1.5 }]}>{article.title}</ArabicText>
     {article.published && <ArabicText style={{ color: colors.muted, fontSize: 10, marginBottom: 22 }}>{new Intl.DateTimeFormat('ar', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(article.published))}</ArabicText>}
     {article.image && <Photo article={article} style={{ marginBottom: 22 }}/>}
-    {(article.paragraphs.length ? article.paragraphs : [article.summary]).map((paragraph, index) => <ArabicText key={index} selectable style={[styles.paragraph, { fontSize: 16 + fontSizeDelta, lineHeight: 33 + fontSizeDelta * 1.5 }]}>{paragraph}</ArabicText>)}
+    {(paragraphs.length ? paragraphs : ['نص الخبر الكامل متوفر بعد الاتصال بالإنترنت.']).map((paragraph, index) => <ArabicText key={index} selectable style={[styles.paragraph, { fontSize: 16 + fontSizeDelta, lineHeight: 33 + fontSizeDelta * 1.5 }]}>{paragraph}</ArabicText>)}
     <Pressable accessibilityRole="link" accessibilityLabel="اقرأ الخبر على هاي كورة" onPress={() => Linking.openURL(article.url).catch(() => setActionError('تعذر فتح المصدر.'))} style={[ui.row, { gap: 10, alignSelf: 'flex-end', marginTop: 15 }]}><ArabicText style={{ color: colors.green, fontFamily: fonts.bold, fontSize: 12 }}>اقرأ الخبر على هاي كورة</ArabicText><Icon name="external" size={15} color={colors.green}/></Pressable>
     {!!error && <ArabicText accessibilityLiveRegion="polite" style={{ color: colors.muted, fontSize: 12, marginTop: 15 }}>{error}</ArabicText>}
   </View>}</ScrollView></Frame>;

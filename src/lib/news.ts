@@ -92,31 +92,41 @@ const safeStorage = {
   }
 };
 
-const FEEDS_STORAGE_KEY = 'akhbar-news-feeds-cache-v1';
-const DETAILS_STORAGE_KEY = 'akhbar-news-details-cache-v1';
+const FEEDS_STORAGE_KEY = 'akhbar-news-feeds-cache-v2';
+const DETAILS_STORAGE_KEY = 'akhbar-news-details-cache-v2';
+const LEGACY_FEEDS_KEY = 'akhbar-news-feeds-cache-v1';
+const LEGACY_DETAILS_KEY = 'akhbar-news-details-cache-v1';
+
+/** Plafonds anti-ANR : un flux RSS complet peut dépasser 50 items. */
+export const MAX_FEED_ARTICLES = 30;
+export const MAX_DETAILS = 100;
 
 const cache = new Map<CategoryId, NewsFeed>();
 const details = new Map<string, Article>();
 
 let persistenceLoaded = false;
+async function readCacheMap(key: string, legacyKey: string): Promise<string | null> {
+  return (await safeStorage.getItem(key)) ?? (await safeStorage.getItem(legacyKey));
+}
 async function ensurePersistenceLoaded() {
   if (persistenceLoaded) return;
   persistenceLoaded = true;
   try {
-    const rawFeeds = await safeStorage.getItem(FEEDS_STORAGE_KEY);
+    const rawFeeds = await readCacheMap(FEEDS_STORAGE_KEY, LEGACY_FEEDS_KEY);
     if (rawFeeds) {
       const parsed = JSON.parse(rawFeeds) as Record<CategoryId, NewsFeed>;
       for (const [key, feed] of Object.entries(parsed)) {
-        if (!cache.has(key as CategoryId)) {
-          cache.set(key as CategoryId, { ...feed, stale: true });
+        if (!cache.has(key as CategoryId) && feed && Array.isArray(feed.articles)) {
+          cache.set(key as CategoryId, { ...feed, articles: feed.articles.slice(0, MAX_FEED_ARTICLES), stale: true });
         }
       }
     }
-    const rawDetails = await safeStorage.getItem(DETAILS_STORAGE_KEY);
+    const rawDetails = await readCacheMap(DETAILS_STORAGE_KEY, LEGACY_DETAILS_KEY);
     if (rawDetails) {
       const parsed = JSON.parse(rawDetails) as Record<string, Article>;
       for (const [key, article] of Object.entries(parsed)) {
-        if (!details.has(key)) details.set(key, article);
+        if (details.size >= MAX_DETAILS) break;
+        if (!details.has(key) && isArticle(article)) details.set(key, article);
       }
     }
   } catch {}
@@ -136,6 +146,51 @@ async function persistDetails() {
     for (const [k, v] of details.entries()) obj[k] = v;
     await safeStorage.setItem(DETAILS_STORAGE_KEY, JSON.stringify(obj));
   } catch {}
+}
+
+// Persistance throttlée (500 ms) : évite un JSON.stringify massif à chaque fetch.
+const PERSIST_DELAY_MS = 500;
+let feedsDirty = false;
+let detailsDirty = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    const runFeeds = feedsDirty;
+    const runDetails = detailsDirty;
+    feedsDirty = false;
+    detailsDirty = false;
+    if (runFeeds) persistFeeds().catch(() => {});
+    if (runDetails) persistDetails().catch(() => {});
+  }, PERSIST_DELAY_MS);
+}
+
+export function schedulePersistFeeds() {
+  feedsDirty = true;
+  schedulePersist();
+}
+
+export function schedulePersistDetails() {
+  detailsDirty = true;
+  schedulePersist();
+}
+
+/** Force l'écriture des changements en attente (utile aux tests et à la fermeture). */
+export async function flushCachePersist(): Promise<void> {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  const runFeeds = feedsDirty;
+  const runDetails = detailsDirty;
+  feedsDirty = false;
+  detailsDirty = false;
+  await Promise.all([
+    runFeeds ? persistFeeds() : Promise.resolve(),
+    runDetails ? persistDetails() : Promise.resolve(),
+  ]);
 }
 
 export async function getCacheStats() {
@@ -190,10 +245,11 @@ export async function clearNewsCache() {
   ]);
 }
 
-async function readRSS(url: string, controller = new AbortController()) {
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+async function readRSS(url: string, controller?: AbortController) {
+  const ctrl = controller ?? new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 15_000);
   try {
-    const response = await fetch(url, { headers: { Accept: 'application/rss+xml, application/xml' }, signal: controller.signal });
+    const response = await fetch(url, { headers: { Accept: 'application/rss+xml, application/xml' }, signal: ctrl.signal });
     if (!response.ok) throw new Error('تعذر الاتصال بمصدر الأخبار. حاول مرة أخرى.');
     const xml = await response.text();
     if (xml.length > 2_000_000) throw new Error('RSS too large');
@@ -208,10 +264,11 @@ export async function getNews(id: CategoryId, controller?: AbortController, refr
   const previous = cache.get(id);
   if (!refresh && previous && !previous.stale && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return previous;
   try {
-    const articles = await readRSS(`https://hihi2.com/category/${category.path}/feed`, controller);
+    const fetched = await readRSS(`https://hihi2.com/category/${category.path}/feed`, controller);
+    const articles = fetched.slice(0, MAX_FEED_ARTICLES);
     const feed: NewsFeed = { articles, category: id, fetchedAt: new Date().toISOString(), stale: false };
     cache.set(id, feed);
-    persistFeeds();
+    schedulePersistFeeds();
     return feed;
   } catch (error) {
     if (previous) return { ...previous, stale: true };
@@ -231,9 +288,9 @@ export async function getArticle(id: string, controller?: AbortController): Prom
     const articles = await readRSS(`https://hihi2.com/?feed=rss2&p=${id}&withoutcomments=1`, controller);
     const article = articles.find(item => getArticleId(item.url) === id) ?? null;
     if (article) {
-      if (details.size >= 100) details.delete(details.keys().next().value!);
+      if (details.size >= MAX_DETAILS) details.delete(details.keys().next().value!);
       details.set(id, article);
-      persistDetails();
+      schedulePersistDetails();
     }
     return article;
   } catch (error) {
@@ -254,4 +311,40 @@ export function isArticle(value: unknown): value is Article {
     && (a.published === null || (typeof a.published === 'string' && !Number.isNaN(Date.parse(a.published))))
     && Array.isArray(a.paragraphs) && a.paragraphs.every(p => typeof p === 'string')
     && Array.isArray(a.tags) && a.tags.every(tag => typeof tag === 'string');
+}
+
+/**
+ * Version légère persistée des favoris : sans `paragraphs` (le champ lourd).
+ * Le corps complet est rechargé via `getArticle(id)` à l'ouverture.
+ */
+export interface SavedArticle {
+  id: string; url: string; title: string; summary: string;
+  image: string | null; published: string | null; tags: string[];
+  savedAt: string;
+}
+
+export const MAX_SAVED = 50;
+
+export function toSavedArticle(input: Article | SavedArticle, savedAt?: string): SavedArticle {
+  const at = (input as Partial<SavedArticle>).savedAt ?? savedAt ?? new Date().toISOString();
+  return {
+    id: input.id,
+    url: input.url,
+    title: input.title,
+    summary: input.summary ?? '',
+    image: input.image ?? null,
+    published: input.published ?? null,
+    tags: Array.isArray(input.tags) ? input.tags.filter(t => typeof t === 'string').slice(0, 8) : [],
+    savedAt: at,
+  };
+}
+
+export function isSavedArticle(value: unknown): value is SavedArticle {
+  if (!value || typeof value !== 'object') return false;
+  const a = value as SavedArticle;
+  return typeof a.id === 'string' && typeof a.title === 'string' && isSourceUrl(a.url) && !!getArticleId(a.url)
+    && typeof a.summary === 'string' && (a.image === null || isSourceUrl(a.image))
+    && (a.published === null || (typeof a.published === 'string' && !Number.isNaN(Date.parse(a.published))))
+    && Array.isArray(a.tags) && a.tags.every(tag => typeof tag === 'string')
+    && typeof a.savedAt === 'string' && !Number.isNaN(Date.parse(a.savedAt));
 }

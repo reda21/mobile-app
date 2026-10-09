@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { categories, type CategoryId } from './categories';
-import { isArticle, type Article, clearNewsCache, pruneExpiredArticles, getCacheStats } from './news';
+import { isArticle, isSavedArticle, toSavedArticle, MAX_SAVED, type Article, type SavedArticle, clearNewsCache, pruneExpiredArticles, getCacheStats } from './news';
 
 export const palettes = {
   light: { paper: '#FAFBF8', surface: '#FFFFFF', ink: '#172923', muted: '#78847D', line: '#E3E8DF', green: '#176347', soft: '#EDF3E9', gold: '#B29A5C' },
@@ -13,18 +13,20 @@ const STORAGE_KEY = 'akhbar-al-kora-profile-v1';
 export interface AppState {
   dark: boolean;
   category: CategoryId;
-  saved: Article[];
+  saved: SavedArticle[];
   fontSizeDelta: number;
   cacheRetentionDays: number;
   ready: boolean;
   notice: string;
   cacheStats: { feedCount: number; articleCount: number };
+  notifyNewNews: boolean;
+  autoCheckNewNews: boolean;
 
   // Actions
   init: () => Promise<void>;
   toggleTheme: () => void;
   selectCategory: (id: CategoryId) => void;
-  toggleSaved: (article: Article) => void;
+  toggleSaved: (article: Article | SavedArticle) => void;
   clearSaved: () => void;
   increaseFontSize: () => void;
   decreaseFontSize: () => void;
@@ -33,6 +35,8 @@ export interface AppState {
   clearCachedArticles: () => Promise<void>;
   refreshCacheStats: () => Promise<void>;
   setNotice: (msg: string) => void;
+  setNotifyNewNews: (v: boolean) => void;
+  setAutoCheckNewNews: (v: boolean) => void;
 }
 
 const memoryStore = new Map<string, string>();
@@ -59,6 +63,7 @@ const safeStorage = {
 };
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 function schedulePersist(state: AppState) {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
@@ -68,9 +73,23 @@ function schedulePersist(state: AppState) {
       saved: state.saved,
       fontSizeDelta: state.fontSizeDelta,
       cacheRetentionDays: state.cacheRetentionDays,
+      notifyNewNews: state.notifyNewNews,
+      autoCheckNewNews: state.autoCheckNewNews,
     });
     safeStorage.setItem(STORAGE_KEY, payload);
   }, 100);
+}
+
+/** Migre les favoris persistés (anciens complets ou nouveaux légers) vers `SavedArticle`. */
+function migrateSaved(raw: unknown): SavedArticle[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SavedArticle[] = [];
+  for (const item of raw) {
+    if (isSavedArticle(item)) out.push(item);
+    else if (isArticle(item)) out.push(toSavedArticle(item));
+    if (out.length >= MAX_SAVED) break;
+  }
+  return out;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -82,6 +101,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   ready: false,
   notice: '',
   cacheStats: { feedCount: 0, articleCount: 0 },
+  notifyNewNews: true,
+  autoCheckNewNews: true,
 
   init: async () => {
     try {
@@ -92,9 +113,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           dark: data.dark === true,
           category: categories.some(c => c.id === data.category) ? data.category : 'latest',
-          saved: Array.isArray(data.saved) ? data.saved.filter(isArticle).slice(0, 100) : [],
+          saved: migrateSaved(data.saved),
           fontSizeDelta: typeof data.fontSizeDelta === 'number' ? Math.max(-2, Math.min(8, data.fontSizeDelta)) : 0,
           cacheRetentionDays: retention,
+          notifyNewNews: data.notifyNewNews !== false,
+          autoCheckNewNews: data.autoCheckNewNews !== false,
         });
         pruneExpiredArticles(retention).catch(() => {});
       }
@@ -122,12 +145,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  toggleSaved: (article: Article) => {
+  toggleSaved: (article: Article | SavedArticle) => {
     set(state => {
       const exists = state.saved.some(a => a.url === article.url);
       const nextSaved = exists
         ? state.saved.filter(a => a.url !== article.url)
-        : [article, ...state.saved].slice(0, 100);
+        : [toSavedArticle(article), ...state.saved].slice(0, MAX_SAVED);
       const next = { ...state, saved: nextSaved };
       schedulePersist(next);
       get().setNotice(exists ? 'تمت إزالة الخبر من المحفوظات' : 'تم حفظ الخبر في قائمتك');
@@ -194,9 +217,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setNotice: (msg: string) => {
+    if (noticeTimer) clearTimeout(noticeTimer);
     set({ notice: msg });
-    setTimeout(() => {
+    if (!msg) {
+      noticeTimer = null;
+      return;
+    }
+    noticeTimer = setTimeout(() => {
+      noticeTimer = null;
       if (get().notice === msg) set({ notice: '' });
     }, 3500);
+  },
+
+  setNotifyNewNews: (v: boolean) => {
+    set(state => {
+      const next = { ...state, notifyNewNews: v };
+      schedulePersist(next);
+      return { notifyNewNews: v };
+    });
+  },
+
+  setAutoCheckNewNews: (v: boolean) => {
+    set(state => {
+      const next = { ...state, autoCheckNewNews: v };
+      schedulePersist(next);
+      return { autoCheckNewNews: v };
+    });
   },
 }));
