@@ -50,6 +50,10 @@ function Navigation() {
       <StatusBar style={dark ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.paper } }}>
         <Stack.Screen name="index" options={{ title: 'أخبار الكرة العالمية — آخر الأخبار' }} />
+        <Stack.Screen name="matches" options={{ title: 'أخبار الكرة العالمية — جدول المباريات' }} />
+        <Stack.Screen name="calendar" options={{ title: 'أخبار الكرة العالمية — رزنامة المباريات' }} />
+        <Stack.Screen name="standings" options={{ title: 'أخبار الكرة العالمية — جدول الترتيب' }} />
+        <Stack.Screen name="stats" options={{ title: 'أخبار الكرة العالمية — الإحصائيات' }} />
         <Stack.Screen name="categories" options={{ title: 'أخبار الكرة العالمية — الأقسام' }} />
         <Stack.Screen name="saved" options={{ title: 'أخبار الكرة العالمية — المحفوظات' }} />
         <Stack.Screen name="settings" options={{ title: 'أخبار الكرة العالمية — الإعدادات' }} />

@@ -302,7 +302,7 @@ export default function SettingsScreen() {
             {categories.map(item => <Pressable key={item.id} accessibilityRole="checkbox" accessibilityLabel={item.name} accessibilityState={{ checked: alertCategories.includes(item.id) }} onPress={() => toggleAlertCategory(item.id)} style={{ padding: 8, borderRadius: 5, backgroundColor: alertCategories.includes(item.id) ? colors.soft : colors.paper }}><ArabicText style={{ fontSize: 11 }}>{item.name}</ArabicText></Pressable>)}
           </View>
           <View style={[ui.row, styles.settingRow]}>
-            <View style={{ flex: 1 }}><ArabicText style={{ fontSize: 13, fontFamily: fonts.medium }}>تذكير يومي بأهم الأخبار</ArabicText><ArabicText style={{ fontSize: 11, color: colors.muted }}>الساعة ١٩:٠٠ حسب وقت هاتفك</ArabicText></View>
+            <View style={{ flex: 1 }}><ArabicText style={{ fontSize: 13, fontFamily: fonts.medium }}>تذكير يومي بأهم الأخبار</ArabicText><ArabicText style={{ fontSize: 11, color: colors.muted }}>الساعة 19:00 حسب وقت هاتفك</ArabicText></View>
             <Switch accessibilityLabel="تذكير يومي" value={dailyReminder} disabled={scheduling || Platform.OS === 'web'} onValueChange={async enabled => {
               setScheduling(true);
               try {

@@ -1,16 +1,16 @@
-const shortDateFormatter = new Intl.DateTimeFormat('ar-EG', {
+const shortDateFormatter = new Intl.DateTimeFormat('ar-EG-u-nu-latn', {
   day: 'numeric',
   month: 'short',
   hour: 'numeric',
   minute: '2-digit',
 });
 
-const longDateFormatter = new Intl.DateTimeFormat('ar-EG', {
+const longDateFormatter = new Intl.DateTimeFormat('ar-EG-u-nu-latn', {
   dateStyle: 'long',
   timeStyle: 'short',
 });
 
-const countFormatter = new Intl.NumberFormat('ar-EG');
+const countFormatter = new Intl.NumberFormat('ar-EG-u-nu-latn');
 
 export type DateFormatStyle = 'short' | 'long';
 

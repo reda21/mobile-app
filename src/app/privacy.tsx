@@ -12,5 +12,5 @@ const sections = [
 
 export default function PrivacyScreen() {
   const { readingMaxWidth } = useResponsive();
-  return <Frame><Header back/><ScrollView contentContainerStyle={{ padding: 24, gap: 16, width: '100%', maxWidth: readingMaxWidth, alignSelf: 'center' }}><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 24 }}>سياسة الخصوصية</ArabicText><ArabicText>آخر تحديث: ٩ أكتوبر ٢٠٢٦</ArabicText>{sections.map(([title, body]) => <ArabicText key={title} selectable style={{ lineHeight: 30 }}>{title}{'\n'}{body}</ArabicText>)}</ScrollView></Frame>;
+  return <Frame><Header back/><ScrollView contentContainerStyle={{ padding: 24, gap: 16, width: '100%', maxWidth: readingMaxWidth, alignSelf: 'center' }}><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 24 }}>سياسة الخصوصية</ArabicText><ArabicText>آخر تحديث: 9 أكتوبر 2026</ArabicText>{sections.map(([title, body]) => <ArabicText key={title} selectable style={{ lineHeight: 30 }}>{title}{'\n'}{body}</ArabicText>)}</ScrollView></Frame>;
 }

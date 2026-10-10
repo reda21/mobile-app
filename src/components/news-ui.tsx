@@ -17,7 +17,7 @@ import type { Article, SavedArticle } from '../lib/news';
 export type CardArticle = Article | SavedArticle;
 
 /** Onglets persistants de la coque applicative. */
-export type BottomTab = 'news' | 'categories' | 'saved' | 'settings';
+export type BottomTab = 'news' | 'matches' | 'categories' | 'saved' | 'settings';
 
 /** Disposition d'une carte d'article : bandeau, ligne compacte, ou tuile de grille. */
 export type CardVariant = 'hero' | 'row' | 'tile';
@@ -41,7 +41,8 @@ export type IconName =
   | 'stop'
   | 'settings'
   | 'trash'
-  | 'clock';
+  | 'clock'
+  | 'trophy';
 
 const iconDefs: Record<IconName, (props: { stroke: string; fill: string }) => ReactNode> = {
   home: () => (
@@ -137,10 +138,20 @@ const iconDefs: Record<IconName, (props: { stroke: string; fill: string }) => Re
       <Path d="M12 6v6l4 2" />
     </>
   ),
+  trophy: () => (
+    <>
+      <Path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+      <Path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+      <Path d="M4 22h16" />
+      <Path d="M10 14.66V17c0 .55-.45 1-1 1H8v4h8v-4h-1c-.55 0-1-.45-1-1v-2.34" />
+      <Path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+    </>
+  ),
 };
 
 const navTabs = [
   { id: 'news', label: 'الأخبار', icon: 'home', href: '/' },
+  { id: 'matches', label: 'المباريات', icon: 'trophy', href: '/matches' },
   { id: 'categories', label: 'الأقسام', icon: 'grid', href: '/categories' },
   { id: 'saved', label: 'المحفوظات', icon: 'bookmark', href: '/saved' },
   { id: 'settings', label: 'الإعدادات', icon: 'settings', href: '/settings' },
