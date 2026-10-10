@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { usePreferences } from '../lib/preferences';
-import { getNotificationPermission, requestNotificationPermission, setDailyNewsReminder } from '../lib/local-notifications';
+import { ensureNewsChannel, getNotificationPermission, requestNotificationPermission, sendNewNewsNotification, setDailyNewsReminder } from '../lib/local-notifications';
 import { categories } from '../lib/categories';
 import { reportProblem } from '../lib/feedback';
 import { router } from 'expo-router';
 import { checkForNewNews } from '../lib/news-watcher';
 import { showToast } from '../lib/toast';
 import { useAppUpdates, type UpdateStatus } from '../hooks/use-app-updates';
+import { useResponsive } from '../hooks/use-responsive';
 import Constants from 'expo-constants';
 import { ArabicText, Frame, Header, Icon, fonts, ui } from '../components/news-ui';
 
@@ -38,6 +39,9 @@ export default function SettingsScreen() {
   const [perm, setPerm] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
   const [checkingNews, setCheckingNews] = useState(false);
   const [scheduling, setScheduling] = useState(false);
+  const [testingNotif, setTestingNotif] = useState(false);
+  const [testNotifMessage, setTestNotifMessage] = useState<string | null>(null);
+  const { readingMaxWidth } = useResponsive();
   const appUpdates = useAppUpdates();
   const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -79,6 +83,48 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleTestSystemNotification = async () => {
+    if (testingNotif) return;
+    setTestingNotif(true);
+    setTestNotifMessage(null);
+    try {
+      if (Platform.OS === 'web') {
+        const count = cacheStats.articleCount;
+        setTestNotifMessage(`الويب لا يدعم إشعارات النظام — المقالات المخزنة: ${count}. جرّب على Android.`);
+        await showToast({ title: 'اختبار الإشعارات', message: `عدد المقالات المخزنة: ${count}` }).catch(() => {});
+        return;
+      }
+      let permission = perm;
+      if (permission !== 'granted') {
+        const ok = await requestNotificationPermission().catch(() => false);
+        permission = await getNotificationPermission().catch(() => 'undetermined' as const);
+        setPerm(permission);
+        if (!ok || permission !== 'granted') {
+          setTestNotifMessage('الإذن مرفوض — فعّل الإشعارات من إعدادات الهاتف ثم أعد المحاولة.');
+          await showToast({ title: 'تعذر إرسال إشعار تجريبي', message: 'اسمح بالإشعارات من إعدادات الهاتف.' }).catch(() => {});
+          return;
+        }
+      }
+      if (Platform.OS === 'android') await ensureNewsChannel();
+      const count = Math.max(1, cacheStats.articleCount);
+      const id = await sendNewNewsNotification({
+        count,
+        latestTitle: `هذا إشعار تجريبي — لديك ${count} مقال كرة مخزّن في التطبيق ⚽`,
+        category,
+      });
+      if (id) {
+        setTestNotifMessage(`تم إرسال إشعار النظام ✅ — عدد المقالات المخزنة: ${count} (id: ${id})`);
+        await showToast({ title: `إشعار تجريبي مرسل (${count} مقالات) 🔔`, message: 'تحقق من شريط إشعارات Android.' }).catch(() => {});
+      } else {
+        setTestNotifMessage('تعذر إرسال الإشعار — الوحدة غير متاحة على هذا الجهاز.');
+      }
+    } catch {
+      setTestNotifMessage('تعذر إرسال الإشعار التجريبي. حاول مرة أخرى.');
+    } finally {
+      setTestingNotif(false);
+    }
+  };
+
   const handleClearSaved = () => {
     if (!saved.length) return;
     const confirmAction = () => {
@@ -109,7 +155,7 @@ export default function SettingsScreen() {
   return (
     <Frame bottom="settings">
       <Header back />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { maxWidth: readingMaxWidth }]}>
         <View style={{ marginBottom: 20 }}>
           <ArabicText style={{ fontSize: 10, color: colors.green }}>—  تخصيص النظام</ArabicText>
           <ArabicText accessibilityRole="header" style={styles.pageTitle}>الإعدادات</ArabicText>
@@ -302,6 +348,57 @@ export default function SettingsScreen() {
             </View>
             <ArabicText style={{ fontSize: 10, color: colors.muted }}>آخر الأخبار</ArabicText>
           </Pressable>
+
+          {/* Test notification système Android + nombre d'articles stockés */}
+          <View style={{ marginTop: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 6, padding: 12, backgroundColor: colors.paper }}>
+            <ArabicText style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.ink }}>
+              اختبار إشعار النظام (Android)
+            </ArabicText>
+            <ArabicText style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>
+              يرسل إشعارًا حقيقيًا في شريط نظام Android يعرض عدد مقالات الكرة المخزنة.
+            </ArabicText>
+
+            <View style={[ui.row, styles.statRow, { borderTopColor: colors.line, borderBottomColor: colors.line, marginTop: 10 }]}>
+              <ArabicText style={{ fontSize: 12, color: colors.muted }}>عدد مقالات الكرة المخزنة:</ArabicText>
+              <ArabicText style={{ fontSize: 13, fontFamily: fonts.bold, color: colors.green }}>
+                {cacheStats.articleCount.toLocaleString('ar')} مقال
+              </ArabicText>
+            </View>
+
+            <View style={[ui.row, styles.statRow, { borderTopColor: colors.line, borderBottomColor: colors.line }]}>
+              <ArabicText style={{ fontSize: 12, color: colors.muted }}>حالة الإذن / القناة:</ArabicText>
+              <ArabicText style={{ fontSize: 11, fontFamily: fonts.bold, color: colors.ink }}>
+                {perm === 'granted' ? 'مفعّل ✅' : perm === 'denied' ? 'مرفوض ❌' : 'غير محدد'} • news
+              </ArabicText>
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="إرسال إشعار تجريبي في نظام Android"
+              disabled={testingNotif}
+              onPress={handleTestSystemNotification}
+              style={[ui.row, styles.actionButton, { backgroundColor: colors.green, borderColor: colors.green, opacity: testingNotif ? 0.6 : 1 }]}
+            >
+              <View style={[ui.row, { gap: 8 }]}>
+                <Icon name="clock" size={17} color="#fff" />
+                <ArabicText style={{ fontFamily: fonts.medium, fontSize: 12, color: '#fff' }}>
+                  {testingNotif ? 'جارٍ الإرسال...' : `إرسال إشعار تجريبي (${cacheStats.articleCount} مقال)`}
+                </ArabicText>
+              </View>
+              <ArabicText style={{ fontSize: 10, color: '#fff' }}>Android 🔔</ArabicText>
+            </Pressable>
+
+            {testNotifMessage ? (
+              <ArabicText style={{ fontSize: 11, color: colors.muted, marginTop: 8 }}>
+                {testNotifMessage}
+              </ArabicText>
+            ) : null}
+            {Platform.OS === 'web' ? (
+              <ArabicText style={{ fontSize: 10, color: colors.muted, marginTop: 4 }}>
+                ملاحظة: الويب لا يدعم إشعارات النظام — يظهر Toast فقط. جرّب على جهاز Android.
+              </ArabicText>
+            ) : null}
+          </View>
         </View>
 
         {/* Section 2: Appearance & Reading */}
@@ -421,7 +518,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 20, paddingTop: 24, paddingBottom: 50 },
+  content: { padding: 20, paddingTop: 24, paddingBottom: 50, width: '100%', alignSelf: 'center' },
   pageTitle: { fontFamily: fonts.heading, fontSize: 26, marginVertical: 6 },
   section: { borderWidth: 1, borderRadius: 8, padding: 16, marginBottom: 18 },
   sectionHeader: { gap: 8, marginBottom: 14 },

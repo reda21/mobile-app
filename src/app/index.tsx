@@ -8,17 +8,20 @@ import { formatCount } from '../lib/format';
 import { t } from '../lib/i18n';
 import { track } from '../lib/analytics';
 import { markCategorySeen } from '../lib/news-watcher';
+import { groupIntoRows, type GridRow } from '../lib/feed-grid';
 import { useDebouncedValue } from '../hooks/use-debounced-value';
 import { useNewsWatcher } from '../hooks/use-news-watcher';
+import { useResponsive } from '../hooks/use-responsive';
 import { usePreferences } from '../lib/preferences';
 import { useNetworkStatus } from '../lib/network';
-import { ArabicText, EmptyState, Frame, Header, Icon, NewsRow, fonts, ui } from '../components/news-ui';
+import { ArticleCard, ArabicText, EmptyState, Frame, Header, Icon, fonts, ui } from '../components/news-ui';
 
 const PAGE_SIZE = 12;
 
 export default function NewsScreen() {
   const { category, selectCategory, colors, ready } = usePreferences();
   const { isOffline } = useNetworkStatus();
+  const { feedColumns } = useResponsive();
   const [result, setResult] = useState<{ key: string; feed?: NewsFeed; error?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [reload, setReload] = useState(0);
@@ -65,6 +68,8 @@ export default function NewsScreen() {
   );
   const listData = useMemo(() => (!loading && !error ? articles : []), [loading, error, articles]);
   const visibleArticles = useMemo(() => listData.slice(0, visibleCount), [listData, visibleCount]);
+  const heroArticle = visibleArticles[0];
+  const gridArticles = useMemo(() => visibleArticles.slice(1), [visibleArticles]);
   const remaining = listData.length - visibleArticles.length;
   const showMore = useCallback(() => {
     setPageState((s) => (s.count >= listData.length ? s : { ...s, count: Math.min(s.count + PAGE_SIZE, listData.length) }));
@@ -82,11 +87,19 @@ export default function NewsScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feed?.articles[0]?.id]);
-  const renderItem = useCallback(({ item, index }: { item: Article; index: number }) => (
-    <NewsRow article={item} hero={index === 0} showMoreHeading={index === 1} />
-  ), []);
-  const keyExtractor = useCallback((item: Article) => item.id, []);
-  const getItemType = useCallback((_: Article, index: number) => (index === 0 ? 'hero' : 'row'), []);
+  // Regroupe les cartes en lignes pour afficher 1 ou 2 colonnes selon la largeur d'écran.
+  const rows = useMemo<GridRow<Article>[]>(
+    () => groupIntoRows(gridArticles, feedColumns, article => article.id),
+    [gridArticles, feedColumns],
+  );
+  const multiColumn = feedColumns > 1;
+  const renderItem = useCallback(({ item }: { item: GridRow<Article> }) => (
+    <View style={multiColumn ? styles.gridRow : styles.gridRowSingle}>
+      {item.items.map(article => <View key={article.id} style={styles.gridCell}><ArticleCard article={article} variant={multiColumn ? 'tile' : 'row'} /></View>)}
+      {multiColumn && Array.from({ length: feedColumns - item.items.length }).map((_, i) => <View key={`spacer-${i}`} style={styles.gridCell} />)}
+    </View>
+  ), [feedColumns, multiColumn]);
+  const keyExtractor = useCallback((row: GridRow<Article>) => row.key, []);
   const handleRefresh = useCallback(() => {
     setIsRefreshing(true);
     setReload(r => r + 1);
@@ -112,7 +125,7 @@ export default function NewsScreen() {
         </ArabicText>
       </Pressable>
     )}
-    <FlashList data={visibleArticles} keyExtractor={keyExtractor} renderItem={renderItem} getItemType={getItemType} drawDistance={600} onEndReached={showMore} onEndReachedThreshold={0.5} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" accessibilityHint="اكتب كلمة للبحث في أخبار القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : isSearching ? 'جارٍ البحث…' : `${formatCount(articles.length)} خبر • ${t('sourceName')}`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" accessibilityHint="اضغط لإعادة تحميل الأخبار" onPress={handleRefresh} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}</View>}
+    <FlashList key={`feed-${feedColumns}`} data={rows} keyExtractor={keyExtractor} renderItem={renderItem} drawDistance={600} onEndReached={showMore} onEndReachedThreshold={0.5} contentContainerStyle={styles.list} refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} tintColor={colors.green} colors={[colors.green]}/>} ListHeaderComponent={<View><ArabicText style={{ color: colors.green, fontSize: 10, marginBottom: 5 }}>—  نبض الكرة</ArabicText><ArabicText accessibilityRole="header" style={{ fontFamily: fonts.heading, fontSize: 27, marginBottom: 6 }}>{section.name}<ArabicText style={{ color: colors.gold, fontSize: 27 }}>.</ArabicText></ArabicText><ArabicText style={{ color: colors.muted, fontSize: 11, lineHeight: 23 }}>أهم القصص، وأحدث التفاصيل. كل ما يهمك في عالم الكرة.</ArabicText><View style={[styles.search, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}><Icon name="search" size={17} color={colors.muted}/><TextInput accessibilityLabel="ابحث في أخبار هذا القسم" accessibilityHint="اكتب كلمة للبحث في أخبار القسم" placeholder="ابحث في أخبار هذا القسم..." placeholderTextColor={colors.muted} value={query} onChangeText={setQuery} style={[styles.input, { color: colors.ink }]} returnKeyType="search"/></View><View style={[styles.status, ui.row, { borderTopColor: colors.line }]}><ArabicText style={{ fontSize: 10, color: colors.muted }}>{loading ? 'نجمع لك أحدث الأخبار...' : isSearching ? 'جارٍ البحث…' : `${formatCount(articles.length)} خبر • ${t('sourceName')}`}</ArabicText><Pressable accessibilityRole="button" accessibilityLabel="تحديث الأخبار" accessibilityHint="اضغط لإعادة تحميل الأخبار" onPress={handleRefresh} style={ui.iconButton}><Icon name="refresh" size={17} color={colors.green}/></Pressable></View>{feed?.stale && <ArabicText style={{ color: colors.muted, fontSize: 11, marginBottom: 15 }}>تُعرض آخر نسخة محفوظة. تعذر الاتصال بالمصدر الآن.</ArabicText>}{heroArticle && <ArticleCard article={heroArticle} variant="hero" />}{gridArticles.length > 0 && <ArabicText accessibilityRole="header" style={[ui.moreHeading, { borderBottomColor: colors.line }]}>المزيد من الأخبار</ArabicText>}</View>}
       ListEmptyComponent={<EmptyState loading={loading} title={loading ? 'أحدث الأخبار في الطريق' : error ? 'الأخبار ستعود قريبًا' : query ? 'لم نجد خبرًا بهذا العنوان' : 'لا توجد أخبار الآن'} message={error || (query ? 'جرّب كلمة أخرى للبحث.' : undefined)} retry={error ? handleRefresh : undefined}/>}
       ListFooterComponent={remaining > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`عرض ${remaining} أخبار إضافية`} accessibilityHint="اضغط لتحميل المزيد من الأخبار" onPress={showMore} style={[styles.moreButton, { borderColor: colors.line, backgroundColor: colors.surface }]}><ArabicText style={[styles.moreButtonText, { color: colors.green }]}>عرض المزيد ({formatCount(remaining)})</ArabicText></Pressable> : undefined}/>
   </Frame>;
@@ -123,6 +136,9 @@ const styles = StyleSheet.create({
   tabs: { borderBottomWidth: 1, paddingHorizontal: 12, gap: 3 },
   tab: { flex: 1, alignItems: 'center', borderBottomWidth: 2, paddingVertical: 16 },
   list: { paddingHorizontal: 20, paddingTop: 25, paddingBottom: 24 },
+  gridRow: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 16, marginBottom: 18 },
+  gridRowSingle: {},
+  gridCell: { flex: 1 },
   search: { marginTop: 20, borderWidth: 1, borderRadius: 5, paddingHorizontal: 13, gap: 10 },
   input: { flex: 1, height: 46, fontFamily: fonts.body, textAlign: 'right', writingDirection: 'rtl', fontSize: 12 },
   status: { borderTopWidth: 1, marginTop: 21, marginBottom: 12, paddingTop: 8, justifyContent: 'space-between' },

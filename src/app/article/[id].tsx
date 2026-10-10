@@ -8,6 +8,7 @@ import { formatDateAr } from '../../lib/format';
 import { t } from '../../lib/i18n';
 import { track } from '../../lib/analytics';
 import { usePreferences } from '../../lib/preferences';
+import { useResponsive } from '../../hooks/use-responsive';
 import { ArabicText, Bookmark, EmptyState, Frame, Header, Icon, Photo, fonts, ui } from '../../components/news-ui';
 
 export default function ArticleScreen() {
@@ -17,6 +18,7 @@ export default function ArticleScreen() {
     if (/^[1-9]\d{0,11}$/.test(id)) void track('article_open', { article_id: id });
   }, [id]);
   const { colors, saved, ready, fontSizeDelta, increaseFontSize, decreaseFontSize } = usePreferences();
+  const { readingMaxWidth } = useResponsive();
   const stored = saved.find(a => getArticleId(a.url) === id);
   const [result, setResult] = useState<{ key: string; article: Article | null; error?: string } | null>(null);
   const [actionError, setActionError] = useState('');
@@ -69,7 +71,7 @@ export default function ArticleScreen() {
     }
   }
 
-  return <Frame><Header back/><ScrollView contentContainerStyle={styles.content}>{loading ? <EmptyState loading title="جار تحميل الخبر"/> : !article ? <EmptyState title={error ? 'الأخبار ستعود قريبًا' : 'هذا الخبر غير موجود'} message={error || 'قد يكون الرابط غير صحيح أو لم يعد الخبر متاحًا.'} retry={error ? () => setRetry(r => r + 1) : undefined}/> : <View>
+  return <Frame><Header back/><ScrollView contentContainerStyle={[styles.content, { maxWidth: readingMaxWidth }]}>{loading ? <EmptyState loading title="جار تحميل الخبر"/> : !article ? <EmptyState title={error ? 'الأخبار ستعود قريبًا' : 'هذا الخبر غير موجود'} message={error || 'قد يكون الرابط غير صحيح أو لم يعد الخبر متاحًا.'} retry={error ? () => setRetry(r => r + 1) : undefined}/> : <View>
     <View style={[ui.row, { justifyContent: 'space-between', marginBottom: 13 }]}><ArabicText style={{ color: colors.green, fontFamily: fonts.medium, fontSize: 11 }}>{article.tags[0] || t('football')} • {t('sourceName')}</ArabicText><View style={ui.row}><Bookmark article={article}/><Pressable accessibilityRole="button" accessibilityLabel="مشاركة الخبر" accessibilityHint="اضغط لمشاركة الخبر" onPress={share} style={ui.iconButton}><Icon name="external" size={18} color={colors.green}/></Pressable></View></View>
     
     <View style={[styles.toolbar, ui.row, { borderColor: colors.line, backgroundColor: colors.surface }]}>
@@ -97,7 +99,7 @@ export default function ArticleScreen() {
   </View>}</ScrollView></Frame>;
 }
 const styles = StyleSheet.create({
-  content: { padding: 20, paddingTop: 25, paddingBottom: 50 },
+  content: { padding: 20, paddingTop: 25, paddingBottom: 50, width: '100%', alignSelf: 'center' },
   title: { fontFamily: fonts.heading, marginBottom: 15 },
   paragraph: { marginBottom: 17 },
   toolbar: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'space-between', marginBottom: 18 },
